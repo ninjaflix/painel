@@ -1,0 +1,134 @@
+{
+  "name": "ninjaflix-agent-cliente",
+  "version": "1.1.18",
+  "description": "Agente local NinjaFlix para vincular mÃ¡quina por CPF, consultar perfis liberados e abrir perfis ADSPower.",
+  "main": "scripts/local-agent.js",
+  "bin": "scripts/local-agent.js",
+  "scripts": {
+    "agent": "node scripts/local-agent.js",
+    "start": "node scripts/local-agent.js",
+    "electron:dev": "electron electron/main.js",
+    "build:electron": "powershell -ExecutionPolicy Bypass -File scripts/build-electron-installer.ps1",
+    "build:bundle": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-inno-bundle.ps1",
+    "build:exe": "powershell -ExecutionPolicy Bypass -File scripts/build-portable-exe.ps1",
+    "build:mac": "bash scripts/build-macos.sh all",
+    "build:mac:intel": "bash scripts/build-macos.sh x64",
+    "build:mac:apple": "bash scripts/build-macos.sh arm64",
+    "check": "node --check scripts/local-agent.js && node --check src/adspower.js && node --check src/config.js",
+    "test:startup": "node scripts/test-electron-agent-startup.js",
+    "test:local-storage": "node scripts/test-local-storage-profile.js"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "build": {
+    "appId": "club.ninjaflix.agent",
+    "productName": "Ninjaflix Painel",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "scripts/local-agent.js",
+      "src/**/*",
+      "public/**/*",
+      ".env.example",
+      "README.md",
+      "package.json",
+      "build/icon.ico",
+      "build/logo-roxo-1024.png",
+      "build/entitlements.mac.plist",
+      "installer/custom-nsis-shortcuts.nsh"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "asarUnpack": [
+      "scripts/local-agent.js",
+      "src/**/*",
+      "public/**/*"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "forceCodeSigning": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "NinjaFlixPainelSetup-1.1.18.${ext}",
+      "icon": "build/icon.ico"
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Ninjaflix Painel",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "include": "installer/custom-nsis-shortcuts.nsh",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ]
+  },
+  "pkg": {
+    "scripts": [
+      "scripts/local-agent.js",
+      "src/adspower.js",
+      "src/config.js"
+    ],
+    "assets": [
+      ".env.example",
+      "README.md"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "dist"
+  },
+  "keywords": [
+    "ninjaflix",
+    "adspower",
+    "agent"
+  ],
+  "author": "NinjaFlix",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  }
+}
+

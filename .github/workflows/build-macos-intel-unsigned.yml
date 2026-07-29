@@ -1,0 +1,51 @@
+name: Compilar macOS Intel nao assinado
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Painel e instalador completo Intel
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+
+    env:
+      MAC_ALLOW_UNSIGNED: "1"
+      ADSPOWER_MAC_X64_URL: "https://version.adspower.net/software/darwin-global/8.6.3/AdsPower-Global-8.6.3.dmg"
+      ADSPOWER_MAC_X64_SHA256: "6f30427000ba4f9a1713823008039bece87717bb5d2f6267722a374521a722fe"
+
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v6
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar macOS Intel
+        run: npm run build:mac:intel
+
+      - name: Mostrar arquivos gerados
+        run: |
+          find ARQUIVOS-GERADOS -maxdepth 6 -type f -print
+          du -sh ARQUIVOS-GERADOS
+
+      - name: Disponibilizar arquivos para download
+        uses: actions/upload-artifact@v4
+        with:
+          name: NinjaFlix-macOS-Intel-nao-assinado-${{ github.run_number }}
+          path: |
+            ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*.zip
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*.pkg
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

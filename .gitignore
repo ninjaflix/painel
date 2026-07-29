@@ -1,0 +1,12 @@
+node_modules/
+.env
+data/*.json
+*.log
+*.zip
+dist/
+dist-*/
+ARQUIVOS-GERADOS/
+.tmp-*/
+adspower_exe/**/*.dmg
+adspower_exe/**/*.pkg
+adspower_exe/**/*.exe

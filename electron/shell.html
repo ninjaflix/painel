@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ninjaflix Painel</title>
+  <style>
+    :root{color-scheme:dark;--bg:#03040b;--bar:#101124;--border:#2c2d43;--fg:#f8fafc;--muted:#a8a8bb;--primary:#a855f7;--bar-h:42px}*{box-sizing:border-box}html,body{width:100%;height:100%;min-height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--fg);font-family:Arial,Helvetica,sans-serif}body{display:grid!important;grid-template-rows:var(--bar-h) minmax(0,1fr)!important}.topbar{position:relative;z-index:10;height:var(--bar-h);min-height:var(--bar-h);display:flex!important;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#151527,#101124);box-shadow:0 8px 24px rgba(0,0,0,.24);user-select:none}.brand{display:flex;align-items:center;gap:7px;margin-right:8px;font-size:11px;font-weight:800;color:#d8b4fe;letter-spacing:.02em;white-space:nowrap}.brand-dot{width:9px;height:9px;border-radius:999px;background:var(--primary);box-shadow:0 0 12px rgba(168,85,247,.85)}button{height:30px;min-width:36px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);font-size:14px;font-weight:800;cursor:pointer}button:hover{border-color:rgba(168,85,247,.45);color:var(--fg);background:rgba(168,85,247,.10)}button:disabled{opacity:.35;cursor:not-allowed}.shell-status-group{margin-left:auto;display:inline-flex;align-items:center;gap:6px;min-width:0;white-space:nowrap}.shell-status{display:inline-flex;align-items:center;gap:5px;height:auto;border:0;border-radius:0;padding:0 4px;color:#facc15;font-size:10px;font-weight:400;text-transform:lowercase;background:transparent}.shell-status span{display:inline-block;width:7px;height:7px;border-radius:999px;background:currentColor;flex:0 0 auto}.shell-status.ok,.shell-status.online{color:#59e39a}.shell-status.offline{color:#fb7185}.status{display:none;color:var(--muted);font-size:10px;white-space:nowrap}.status.show{display:inline}.status.loading{color:#c084fc}.content{position:relative;z-index:1;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;background:#03040b;display:flex!important}webview{display:flex!important;flex:1 1 auto!important;width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;background:#03040b}.update-overlay{position:fixed;z-index:100;inset:0;display:grid;place-items:center;background:rgba(3,4,11,.82);backdrop-filter:blur(8px)}.update-overlay.hidden{display:none}.update-card{width:min(520px,calc(100% - 32px));padding:28px;border:1px solid rgba(168,85,247,.45);border-radius:22px;background:linear-gradient(145deg,#17172b,#0d0e1c);box-shadow:0 30px 80px rgba(0,0,0,.55)}.update-card h2{margin:0 0 12px;color:#e9d5ff}.update-card p{color:var(--muted);line-height:1.55;white-space:pre-wrap}.update-versions{display:flex;gap:12px;margin:18px 0}.update-versions span{flex:1;padding:10px;border:1px solid var(--border);border-radius:10px;color:#ddd6fe}.update-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}.update-actions button{height:40px;padding:0 18px}.update-primary{background:linear-gradient(135deg,#a855f7,#7c3aed);color:white}.update-progress{height:6px;margin-top:14px;border-radius:999px;background:#292a3f;overflow:hidden}.update-progress span{display:block;width:0;height:100%;background:linear-gradient(90deg,#a855f7,#d8b4fe);transition:width .2s}.update-warning{color:#facc15!important;font-weight:700}
+    .hidden{display:none!important}
+    .shell-status{position:relative;cursor:help}.shell-status.checking{color:#c084fc}.shell-status.checking>span{width:10px;height:10px;border:2px solid rgba(192,132,252,.3);border-top-color:#c084fc;background:transparent;animation:shellSearching .7s linear infinite}@keyframes shellSearching{to{transform:rotate(360deg)}}.shell-status::after{content:attr(data-detail);position:fixed;z-index:200;top:38px;right:10px;width:min(340px,calc(100vw - 20px));padding:10px 12px;border:1px solid rgba(168,85,247,.45);border-radius:10px;background:#17172b;color:#f8fafc;font-size:11px;font-weight:500;line-height:1.4;text-transform:none;white-space:normal;box-shadow:0 14px 35px rgba(0,0,0,.5);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s}.shell-status:hover::after,.shell-status:focus::after{opacity:1;visibility:visible}
+    :root{--bar-h:48px}.topbar{gap:7px;padding:5px 10px}.topbar>button{display:grid;place-items:center;width:40px;height:38px;min-width:40px;padding:0;border-radius:10px;color:#c4b5d8}.topbar>button svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}.topbar>#refreshButton svg,.topbar>#homeButton svg{fill:currentColor;stroke:none}.topbar>button:hover{color:#fff;background:rgba(168,85,247,.14);border-color:rgba(168,85,247,.48)}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <button id="backButton" title="Voltar" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"/></svg></button>
+    <button id="forwardButton" title="Avançar" aria-label="Avançar"><svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+    <button id="refreshButton" title="Atualizar" aria-label="Atualizar"><svg xmlns="http://www.w3.org/2000/svg" version="1" viewBox="0 0 32 32"><path d="M8.22 23.778A10.917 10.917 0 0 1 5 16c0-4.709 2.97-8.738 7.14-10.298-.28-.71-.13-1.54.45-2.11.78-.79 2.04-.79 2.82 0l1.86 1.87c.05.04.09.08.14.13.09.09.17.19.25.29 0 .01.01.02.01.02.06.1.12.21.17.32.01.01.01.02.01.03.05.11.08.23.11.35v.02c.03.12.04.25.04.38s-.01.26-.04.38v.02c-.03.12-.06.24-.11.35 0 .01 0 .02-.01.03-.05.11-.11.22-.17.32 0 0-.01.01-.01.02-.08.1-.16.2-.25.29-.05.05-.09.09-.14.13l-1.86 1.87c-.78.79-2.04.79-2.82 0-.11-.11-.2-.23-.28-.35A6.965 6.965 0 0 0 9 16c0 1.87.73 3.629 2.05 4.949.78.78.78 2.05 0 2.829-.78.78-2.05.78-2.83 0zm8.37 4.63-2-2c-.09-.09-.17-.19-.25-.29 0-.01-.01-.02-.01-.02-.06-.1-.12-.21-.17-.32-.01-.01-.01-.02-.01-.03-.05-.11-.08-.23-.11-.35v-.02c-.03-.12-.04-.25-.04-.38s.01-.26.04-.38v-.02c.03-.12.06-.24.11-.35 0-.01 0-.02.01-.03.05-.11.11-.22.17-.32 0 0-.01.01-.01.02.08-.1.16-.2.25-.29l2-2c.78-.79 2.04-.79 2.82 0 .11.11.2.23.28.35A6.964 6.964 0 0 0 23 16c0-1.87-.73-3.629-2.05-4.949-.78-.78-.78-2.05 0-2.829.78-.78 2.05-.78 2.83 0A10.917 10.917 0 0 1 27 16c0 4.709-2.97 8.738-7.14 10.298.28.71.13 1.54-.45 2.11-.78.79-2.04.79-2.82 0z"/></svg></button>
+    <button id="homeButton" title="Início" aria-label="Início"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M22.15527,10.47266v-.00049l-8.93652-8.123a1.80315,1.80315,0,0,0-2.4375-.00049l-8.8591,8.05363a1.90654,1.90654,0,0,0-.62351,1.82237,1.80453,1.80453,0,0,0,1.76581,1.40086h.439a.31259.31259,0,0,1,.312.312v6.37256a1.812,1.812,0,0,0,1.812,1.812H8.75a1,1,0,0,0,1-1V17.45765a2.34246,2.34246,0,0,1,2.014-2.37131,2.2527,2.2527,0,0,1,2.486,2.23788v3.79785a1,1,0,0,0,1,1h3.12207a1.8125,1.8125,0,0,0,1.8125-1.8125V13.9375a.313.313,0,0,1,.3125-.312h.43848a1.81222,1.81222,0,0,0,1.21972-3.15283Z" data-name="Layer 2"/></svg></button>
+    <span class="shell-status-group"><span id="shellBindBadge" class="shell-status warn"><span></span> dispositivo</span><span id="shellApiBadge" class="shell-status warn"><span></span> dashboard</span><span id="shellAdspowerBadge" class="shell-status warn"><span></span> adspower</span><span id="status" class="status">iniciando...</span></span>
+  </header>
+  <main class="content">
+    <webview id="agentView" partition="persist:ninjaflix-agent" allowpopups></webview>
+  </main>
+  <section id="updateOverlay" class="update-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
+    <div class="update-card">
+      <h2 id="updateTitle">Nova atualização disponível</h2>
+      <strong id="updateReleaseTitle"></strong>
+      <div class="update-versions"><span>Instalada: <strong id="currentVersion"></strong></span><span>Nova: <strong id="latestVersion"></strong></span></div>
+      <p id="updateMessage"></p><p id="updateMandatory" class="update-warning hidden">Esta atualização é obrigatória para continuar.</p>
+      <div id="updateProgress" class="update-progress hidden"><span></span></div><p id="updateStatus"></p>
+      <div class="update-actions"><button id="updateLater">Depois</button><button id="updateNow" class="update-primary">Atualizar agora</button></div>
+    </div>
+  </section>
+  <script>
+    const view = document.querySelector('#agentView');
+    const backButton = document.querySelector('#backButton');
+    const forwardButton = document.querySelector('#forwardButton');
+    const refreshButton = document.querySelector('#refreshButton');
+    const homeButton = document.querySelector('#homeButton');
+    const statusEl = document.querySelector('#status');
+    const shellBindBadge = document.querySelector('#shellBindBadge');
+    const shellApiBadge = document.querySelector('#shellApiBadge');
+    const shellAdspowerBadge = document.querySelector('#shellAdspowerBadge');
+    let homeUrl = '';
+    let availableUpdate = null;
+    let updateBusy = false;
+    let lastAuthenticated = false;
+    let dismissedVersion = '';
+    let lastActiveRefreshAt = Date.now();
+
+    function setShellBadge(el, kind, text, detail = '') { if (!el) return; el.className = 'shell-status ' + kind; el.dataset.detail = detail || text; el.tabIndex = 0; el.innerHTML = '<span></span> ' + text; }
+
+    function applyAdspowerBootstrapStatus(state = {}) {
+      const status = String(state.status || 'idle');
+      const message = String(state.message || 'Verificando estado do AdsPower...');
+      const inProgress = Boolean(state.inProgress || status === 'starting' || status === 'starting_api' || status === 'queued');
+
+      if (inProgress) {
+        return setShellBadge(
+          shellAdspowerBadge,
+          'checking',
+          'adspower',
+          message || 'Iniciando AdsPower...'
+        );
+      }
+
+      if (status === 'online') {
+        const extra = state.processRunning && state.api ? '' : '';
+        return setShellBadge(
+          shellAdspowerBadge,
+          'online',
+          'adspower',
+          `${message || 'AdsPower conectado'}${extra}`
+        );
+      }
+
+      if (status === 'requires_api_key') {
+        return setShellBadge(
+          shellAdspowerBadge,
+          'warn',
+          'adspower',
+          message || 'A conexão com o AdsPower precisa de atenção. Aguarde ou tente conectar novamente.'
+        );
+      }
+
+      if (status === 'not_found') {
+        return setShellBadge(
+          shellAdspowerBadge,
+          'warn',
+          'adspower',
+          message || 'AdsPower não encontrado. Abra manualmente e tente novamente.'
+        );
+      }
+
+      if (status === 'failed') {
+        return setShellBadge(
+          shellAdspowerBadge,
+          'offline',
+          'adspower',
+          message || 'Falha ao inicializar AdsPower.'
+        );
+      }
+
+      return setShellBadge(
+        shellAdspowerBadge,
+        'warn',
+        'adspower',
+        message || 'AdsPower não inicializado.'
+      );
+    }
+
+    async function refreshShellStatuses() {
+      setShellBadge(shellBindBadge, 'checking', 'dispositivo', 'Verificando autorização deste computador...');
+      setShellBadge(shellApiBadge, 'checking', 'dashboard', 'Verificando conexão com o dashboard...');
+      setShellBadge(shellAdspowerBadge, 'checking', 'adspower', 'Iniciando AdsPower...');
+
+      let agentAuthenticated = false;
+
+      try {
+        const healthResponse = await fetch(homeUrl + 'health', { cache: 'no-store' });
+        const health = await healthResponse.json();
+        if (!healthResponse.ok) throw new Error(health.error || `HTTP ${healthResponse.status}`);
+        setShellBadge(shellApiBadge, 'online', 'dashboard', 'Dashboard central conectado e respondendo normalmente.');
+        setShellBadge(
+          shellBindBadge,
+          health.authenticated ? 'ok' : (health.accessIssue ? 'offline' : 'warn'),
+          'dispositivo',
+          health.authenticated ? 'Este computador está autenticado e autorizado.' : (health.accessIssue?.message || health.error || 'Faça login para autorizar este computador.')
+        );
+
+        agentAuthenticated = Boolean(health.authenticated);
+        if (agentAuthenticated && !lastAuthenticated) setTimeout(checkForUpdates, 500);
+        lastAuthenticated = agentAuthenticated;
+      } catch (error) {
+        setShellBadge(shellApiBadge, 'offline', 'dashboard', `Dashboard indisponível: ${error.message || 'não respondeu'}`);
+        return;
+      }
+
+      if (!agentAuthenticated) {
+        return setShellBadge(
+          shellAdspowerBadge,
+          'warn',
+          'adspower',
+          'Entre no painel para verificar a conexão com o AdsPower.'
+        );
+      }
+
+      try {
+        const bootstrapResponse = await fetch(homeUrl + 'admin/adspower/bootstrap-status', { cache: 'no-store' });
+        if (!bootstrapResponse.ok) throw new Error(`HTTP ${bootstrapResponse.status}`);
+        const bootstrap = await bootstrapResponse.json();
+        applyAdspowerBootstrapStatus(bootstrap);
+
+        if (!bootstrap?.inProgress && bootstrap?.status !== 'online' && bootstrap?.status !== 'requires_api_key') {
+          const adsResponse = await fetch(homeUrl + 'admin/adspower/profiles', { cache: 'no-store' });
+          const ads = await adsResponse.json();
+          if (!adsResponse.ok) throw new Error(ads.error || `HTTP ${adsResponse.status}`);
+          if (ads.ok === false) {
+            return setShellBadge(
+              shellAdspowerBadge,
+              'offline',
+              'adspower',
+              ads.message || 'Não foi possível conectar ao AdsPower. Aguarde alguns instantes e tente novamente.'
+            );
+          }
+          const total = (ads.rawProfiles?.data?.list || ads.rawProfiles?.data || ads.groups || []).length || 0;
+          setShellBadge(
+            shellAdspowerBadge,
+            ads.needsApiKey ? 'warn' : 'online',
+            'adspower',
+            ads.needsApiKey
+              ? 'A conexão com o AdsPower precisa de atenção. Tente novamente em instantes.'
+              : `AdsPower conectado${total ? `; ${total} perfil(is) detectado(s).` : '.'}`
+          );
+        }
+      } catch (error) {
+        setShellBadge(shellAdspowerBadge, 'offline', 'adspower', 'Não foi possível conectar ao AdsPower. Aguarde e tente novamente.');
+      }
+    }
+
+    function updateNavigation() {
+      document.title = view.getTitle() || 'Ninjaflix Painel';
+      backButton.disabled = !view.canGoBack();
+      forwardButton.disabled = !view.canGoForward();
+    }
+
+    async function boot() {
+      homeUrl = await window.ninjaflixAgent.getAgentUrl();
+      const appVersion = await window.ninjaflixAgent.getAppVersion();
+      view.src = homeUrl;
+      refreshShellStatuses();
+      setInterval(refreshShellStatuses, 15000);
+      statusEl.textContent = '';
+      statusEl.classList.remove('show');
+      statusEl.classList.add('loading');
+      setTimeout(checkForUpdates, 4000);
+      setInterval(checkForUpdates, 30 * 60 * 1000);
+    }
+
+    async function checkForUpdates() {
+      if (!homeUrl || updateBusy) return;
+      try {
+        const response = await fetch(homeUrl + 'updates/latest', { cache: 'no-store' });
+        if (!response.ok) return;
+        const result = await response.json();
+        if (!result.updateAvailable || !result.update) return;
+        if (!result.update.mandatory && dismissedVersion === result.update.version) return;
+        availableUpdate = result.update;
+        document.querySelector('#updateReleaseTitle').textContent = availableUpdate.title || 'Nova versão do Ninjaflix Painel';
+        document.querySelector('#currentVersion').textContent = result.currentVersion;
+        document.querySelector('#latestVersion').textContent = availableUpdate.version;
+        document.querySelector('#updateMessage').textContent = availableUpdate.message || '';
+        document.querySelector('#updateMandatory').classList.toggle('hidden', !availableUpdate.mandatory);
+        document.querySelector('#updateLater').classList.toggle('hidden', Boolean(availableUpdate.mandatory));
+        document.querySelector('#updateOverlay').classList.remove('hidden');
+      } catch (_) { /* consulta silenciosa: não bloqueia o painel */ }
+    }
+
+    document.querySelector('#updateLater').addEventListener('click', () => {
+      dismissedVersion = availableUpdate?.version || '';
+      document.querySelector('#updateOverlay').classList.add('hidden');
+    });
+    document.querySelector('#updateNow').addEventListener('click', async () => {
+      if (!availableUpdate || updateBusy) return;
+      updateBusy = true;
+      document.querySelector('#updateNow').disabled = true;
+      document.querySelector('#updateLater').disabled = true;
+      document.querySelector('#updateProgress').classList.remove('hidden');
+      document.querySelector('#updateStatus').textContent = 'Preparando atualização...';
+      try { await window.ninjaflixAgent.installUpdate(availableUpdate); }
+      catch (error) {
+        updateBusy = false;
+        document.querySelector('#updateNow').disabled = false;
+        document.querySelector('#updateLater').disabled = Boolean(availableUpdate.mandatory);
+        document.querySelector('#updateStatus').textContent = `Não foi possível atualizar: ${error.message}`;
+      }
+    });
+
+    window.ninjaflixAgent.onUpdateStatus((event) => {
+      const text = document.querySelector('#updateStatus');
+      if (event.status === 'downloading') {
+        const percent = Math.min(100, Math.round((event.received / event.total) * 100));
+        document.querySelector('#updateProgress span').style.width = `${percent}%`;
+        text.textContent = `Baixando atualização... ${percent}%`;
+      } else if (event.status === 'installing') text.textContent = 'Instalando. O painel será reiniciado...';
+      else if (event.status === 'error') text.textContent = `Falha na atualização: ${event.message || 'tente novamente'}`;
+    });
+
+    backButton.addEventListener('click', () => { if (view.canGoBack()) view.goBack(); });
+    forwardButton.addEventListener('click', () => { if (view.canGoForward()) view.goForward(); });
+    refreshButton.addEventListener('click', () => view.reload());
+    homeButton.addEventListener('click', () => { if (homeUrl) view.src = homeUrl; });
+
+    function refreshAfterWindowActivation() {
+      if (!homeUrl || document.hidden || Date.now() - lastActiveRefreshAt < 2000) return;
+      lastActiveRefreshAt = Date.now();
+      view.reload();
+      refreshShellStatuses();
+    }
+
+    window.ninjaflixAgent.onWindowReactivated(refreshAfterWindowActivation);
+    window.addEventListener('focus', refreshAfterWindowActivation);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refreshAfterWindowActivation();
+    });
+
+    window.addEventListener('keydown', (event) => {
+      if (!event.altKey) return;
+      if (event.key === 'ArrowLeft' && view.canGoBack()) view.goBack();
+      if (event.key === 'ArrowRight' && view.canGoForward()) view.goForward();
+      if (event.key.toLowerCase() === 'r') view.reload();
+      if (event.key.toLowerCase() === 'h' && homeUrl) view.src = homeUrl;
+    });
+
+    view.addEventListener('did-start-loading', () => {
+      statusEl.textContent = '';
+      statusEl.classList.remove('show');
+      statusEl.classList.add('loading');
+      updateNavigation();
+    });
+
+    view.addEventListener('did-stop-loading', () => {
+      statusEl.textContent = '';
+      statusEl.classList.remove('show');
+      statusEl.classList.remove('loading');
+      updateNavigation();
+    });
+
+    view.addEventListener('did-navigate', updateNavigation);
+    view.addEventListener('did-navigate-in-page', updateNavigation);
+
+    view.addEventListener('new-window', (event) => {
+      event.preventDefault();
+      if (event.url) view.loadURL(event.url);
+    });
+
+    boot();
+  </script>
+</body>
+</html>
