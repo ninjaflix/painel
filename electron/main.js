@@ -8,7 +8,7 @@ const { spawn } = require('node:child_process');
 
 const AGENT_PORT = Number(process.env.AGENT_PORT || 3101);
 const AGENT_URL = `http://127.0.0.1:${AGENT_PORT}/`;
-const APP_VERSION = process.env.AGENT_VERSION || '1.1.19';
+const APP_VERSION = process.env.AGENT_VERSION || '1.1.20';
 const ADSPOWER_BASE_URL = 'http://127.0.0.1:50326';
 const ADSPOWER_DISABLE_PASSWORD_FILLING = '0';
 const ADSPOWER_ENABLE_PASSWORD_SAVING = '1';
@@ -305,8 +305,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
     height: 1000,
-    minWidth: 1366,
-    minHeight: 820,
+    minWidth: 820,
+    minHeight: 640,
     useContentSize: true,
     title: `Ninjaflix Painel ${APP_VERSION}`,
     backgroundColor: '#03040b',

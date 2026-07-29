@@ -20,7 +20,7 @@ const {
 
 const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const PORT = Number(process.env.AGENT_PORT || 3101);
-const APP_VERSION = process.env.AGENT_VERSION || '1.1.19';
+const APP_VERSION = process.env.AGENT_VERSION || '1.1.20';
 const ADSPOWER_API_PORT = '50326';
 function normalizePortalUrl(value) {
   const raw = String(value || `http://127.0.0.1:${config.port}`).replace(/\/$/, '');
@@ -330,8 +330,19 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
   .desktop-update-status{min-height:18px;margin-top:8px!important;color:#c4b5fd!important}
   .desktop-update-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:13px}.desktop-update-actions button{padding:8px 11px}.desktop-update-install{border-color:#a855f7;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff}
   .top-actions{min-width:112px!important}.notice-wrap{order:1}.profile-wrap{order:3}
-  .agent-top,.shell{width:min(1120px,calc(100% - 48px))!important}
+  .agent-top,.shell{width:min(1560px,calc(100% - 48px))!important}
+  .tools-shell{grid-template-columns:220px minmax(0,1fr)!important}
+  .tools-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}
   .tools-content,.tools-toolbar>*,.profile-card>*{min-width:0}
+  @media(max-width:1399px){
+    .tools-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  }
+  @media(max-width:1050px){
+    .tools-shell{grid-template-columns:190px minmax(0,1fr)!important;gap:14px!important}
+    .tools-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+    .tools-toolbar{flex-direction:column!important;margin:22px 0!important}
+    .tools-actions{width:100%!important}.tool-search{width:100%!important;min-width:0!important}
+  }
   @media(max-width:980px){
     .agent-top,.shell{width:calc(100% - 28px)!important}
     .agent-top{position:relative!important;top:auto!important;left:auto!important;transform:none!important}
@@ -342,8 +353,13 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
     .top-info{grid-column:1/-1!important;grid-row:2!important;width:100%!important}
     .info-row{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;width:100%!important}
     .header-kernel-status{grid-column:1/-1!important;width:100%!important}
-    .tools-shell{grid-template-columns:1fr!important}.tools-sidebar-wrap{position:static!important}.tools-sidebar{width:100%!important}
-    .tools-toolbar{flex-direction:column!important;margin:22px 0!important}.tools-actions{width:100%!important}.tool-search{width:100%!important;min-width:0!important}
+    .tools-shell{grid-template-columns:190px minmax(0,1fr)!important}
+    .tools-sidebar-wrap{position:sticky!important;top:12px!important}.tools-sidebar{width:auto!important}
+  }
+  @media(max-width:760px){
+    .tools-shell{grid-template-columns:1fr!important}
+    .tools-sidebar-wrap{position:static!important}.tools-sidebar{width:100%!important}
+    .tools-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
   }
   @media(max-width:640px){
     .agent-top,.shell{width:calc(100% - 20px)!important}
@@ -372,7 +388,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
     window.addEventListener('unhandledrejection',()=>window.finishAgentBoot());
   </script>
   <div id="kernelInstallOverlay" class="kernel-install-overlay hidden" role="dialog" aria-modal="true" aria-live="polite"><section class="kernel-install-card"><h2 id="kernelInstallTitle">Preparando seu navegador</h2><p id="kernelInstallMessage">Aguarde enquanto preparamos tudo para abrir seu perfil.</p><div class="kernel-install-track"><span id="kernelInstallProgress" class="kernel-install-progress"></span></div><span id="kernelInstallPercent" class="kernel-install-percent">0%</span></section></div>
-  <header class="agent-top"><div class="agent-frame"><div class="top-line"><div class="brand"><div class="logo"><img src="/logo-roxo.svg" alt="Ninjaflix" /></div><div><div class="brand-title">Ninjaflix</div><div class="brand-sub muted">Dashboard de ferramentas</div></div></div><div class="top-info"><div class="info-row"><div class="chip"><span>Pacote:</span> <strong id="clientPackage">-</strong></div><div class="chip"><span>Validade:</span> <strong id="subscriptionInfo">-</strong></div><div id="headerKernelStatus" class="header-kernel-status hidden"></div></div></div><div class="top-actions"><div class="notice-wrap"><button id="noticeButton" class="top-icon" title="Avisos">Avisos</button><div id="noticeDropdown" class="notice-dropdown hidden"><div class="notice-dropdown-title">Avisos recentes</div><div id="noticeDropdownList" class="notice-list"><div class="notice-item"><strong>Carregando...</strong></div></div></div></div><div id="desktopUpdateWrap" class="desktop-update-wrap hidden"><button id="desktopUpdateButton" class="top-icon desktop-update-button" title="Atualizações" aria-label="Atualizações">Atualizações</button><div id="desktopUpdateDropdown" class="desktop-update-dropdown hidden"><h3>Atualização pendente</h3><p id="desktopUpdateTitle">Uma nova versão está pronta.</p><span id="desktopUpdateVersion" class="desktop-update-version"></span><p id="desktopUpdateMessage"></p><p id="desktopUpdateStatus" class="desktop-update-status"></p><div class="desktop-update-actions"><button id="desktopUpdateLater" type="button">Agora não</button><button id="desktopUpdateInstall" class="desktop-update-install" type="button">Atualizar agora</button></div></div></div><div class="profile-wrap"><button id="profileButton" class="profile-button" title="Perfil do cliente">Perfil</button><div id="profileDropdown" class="profile-dropdown hidden"><div class="profile-head"><div class="profile-avatar">P</div><div><strong id="profileName">Cliente</strong><small id="profileEmail">-</small></div></div><div class="profile-row"><span>Pacote</span><strong id="profilePackage">-</strong></div><div class="profile-row"><span>Validade</span><strong id="profileValidity">-</strong></div><button id="profileLogoutButton" class="danger profile-logout">Sair do agente</button></div></div></div></div><nav class="main-menu"><button class="active" data-panel="tools">Ferramentas</button><button data-launch="financeiro">Financeiro</button><button data-launch="suporte">Suporte</button><button data-launch="tutoriais">Tutoriais</button></nav></div></header>
+  <header class="agent-top"><div class="agent-frame"><div class="top-line"><div class="brand"><div class="logo"><img src="/logo-roxo.svg" alt="Ninjaflix" /></div><div><div class="brand-title">Ninjaflix</div><div class="brand-sub muted">Dashboard de ferramentas</div></div></div><div class="top-info"><div class="info-row"><div class="chip"><span>Pacote:</span> <strong id="clientPackage">-</strong></div><div class="chip"><span>Validade:</span> <strong id="subscriptionInfo">-</strong></div><div id="headerKernelStatus" class="header-kernel-status hidden"></div></div></div><div class="top-actions"><div class="notice-wrap"><button id="noticeButton" class="top-icon" title="Avisos">Avisos</button><div id="noticeDropdown" class="notice-dropdown hidden"><div class="notice-dropdown-title">Avisos recentes</div><div id="noticeDropdownList" class="notice-list"><div class="notice-item"><strong>Carregando...</strong></div></div></div></div><div id="desktopUpdateWrap" class="desktop-update-wrap"><button id="desktopUpdateButton" class="top-icon desktop-update-button" title="Atualizações" aria-label="Atualizações">Atualizações</button><div id="desktopUpdateDropdown" class="desktop-update-dropdown hidden"><h3>Atualizações</h3><p id="desktopUpdateTitle">Verificando atualizações...</p><span id="desktopUpdateVersion" class="desktop-update-version"></span><p id="desktopUpdateMessage"></p><p id="desktopUpdateStatus" class="desktop-update-status"></p><div class="desktop-update-actions"><button id="desktopUpdateLater" type="button">Fechar</button><button id="desktopUpdateInstall" class="desktop-update-install hidden" type="button">Atualizar agora</button></div></div></div><div class="profile-wrap"><button id="profileButton" class="profile-button" title="Perfil do cliente">Perfil</button><div id="profileDropdown" class="profile-dropdown hidden"><div class="profile-head"><div class="profile-avatar">P</div><div><strong id="profileName">Cliente</strong><small id="profileEmail">-</small></div></div><div class="profile-row"><span>Pacote</span><strong id="profilePackage">-</strong></div><div class="profile-row"><span>Validade</span><strong id="profileValidity">-</strong></div><button id="profileLogoutButton" class="danger profile-logout">Sair do agente</button></div></div></div></div><nav class="main-menu"><button class="active" data-panel="tools">Ferramentas</button><button data-launch="financeiro">Financeiro</button><button data-launch="suporte">Suporte</button><button data-launch="tutoriais">Tutoriais</button></nav></div></header>
   <main class="shell"><section id="activationCard" class="login-card"><form id="activationForm" class="login-form"><input name="email" type="email" autocomplete="email" placeholder="E-mail usado no checkout" required /><button>Entrar e vincular maquina</button></form></section><section id="agentCard" class="tools-shell hidden"><div class="tools-sidebar-wrap"><aside class="tools-sidebar"><div class="sidebar-title">Categorias</div><div id="categoryList"></div></aside><div id="kernelStatus" class="kernel-status hidden" role="status" aria-live="polite"></div></div><section class="tools-content"><div class="tools-toolbar"><div><h1 id="toolsTitle">Plano ativo</h1><p id="toolsSubtitle" class="muted">Ferramentas prontas - organizadas por categoria</p></div><div class="tools-actions"><input id="toolSearch" class="tool-search" placeholder="Buscar ferramenta..." /><button id="refreshProfiles" class="secondary">Atualizar</button></div></div><div id="profilesList"></div><pre id="resultBox" class="hidden"></pre></section></section><section id="debugCard" class="card hidden"><h2>Debug da maquina</h2><button id="debugButton" class="secondary">Comparar com portal</button><pre id="debugBox"></pre></section></main>
   <div id="noticeModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="noticeModalTitle"><section class="agent-modal"><div class="modal-head"><div><h2 id="noticeModalTitle">Avisos e novidades</h2><p class="muted">Ultimas noticias e informacoes enviadas pelo painel admin agente.</p></div><button class="modal-close" data-close-modal="noticeModal">x</button></div><div id="noticeList" class="notice-list"><div class="notice-item"><strong>Carregando avisos...</strong><p>Aguarde enquanto buscamos as ultimas informacoes.</p></div></div></section></div>
   <div id="agentPopupModal" class="modal-backdrop agent-popup hidden" role="dialog" aria-modal="true" aria-labelledby="agentPopupTitle"><section class="agent-modal"><div class="modal-head"><div><h2 id="agentPopupTitle">Aviso</h2></div><button class="modal-close" data-close-modal="agentPopupModal">x</button></div><div id="agentPopupBody" class="notice-list"></div><a id="agentPopupCta" class="popup-cta hidden" href="#" target="_blank" rel="noopener">Abrir link</a></section></div>
@@ -723,17 +739,28 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
       const version=document.querySelector('#desktopUpdateVersion');
       const message=document.querySelector('#desktopUpdateMessage');
       const status=document.querySelector('#desktopUpdateStatus');
-      if(!bridge||!wrap||!button)return;
+      if(!wrap||!button)return;
       let pending=null;
       function render(payload){
         pending=payload?.update||null;
-        wrap.classList.toggle('hidden',!pending);
+        wrap.classList.remove('hidden');
         button.classList.toggle('has-update',Boolean(pending));
-        if(!pending){dropdown.classList.add('hidden');return}
+        if(!pending){
+          title.textContent='Painel atualizado';
+          version.textContent='Nenhuma atualização pendente';
+          message.textContent='Você está usando a versão mais recente disponível.';
+          status.textContent='';
+          install.classList.add('hidden');
+          later.textContent='Fechar';
+          return
+        }
         title.textContent=pending.title||'Nova versão do Ninjaflix Painel';
         version.textContent='Versão '+String(pending.version||'');
         message.textContent=pending.message||'Você pode instalar agora ou deixar para mais tarde.';
-        install.disabled=false;
+        install.classList.remove('hidden');
+        install.disabled=!bridge;
+        install.textContent=bridge?'Atualizar agora':'Abra no aplicativo';
+        later.textContent='Agora não';
         status.textContent='';
       }
       async function refresh(){
@@ -748,8 +775,8 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
         bridge.installUpdate(pending);
       });
       document.addEventListener('click',event=>{if(!event.target.closest('.desktop-update-wrap'))dropdown.classList.add('hidden')});
-      bridge.onUpdateAvailable(render);
-      bridge.onUpdateStatus(event=>{
+      bridge?.onUpdateAvailable(render);
+      bridge?.onUpdateStatus(event=>{
         if(event?.status==='downloading'){
           const percent=event.total?Math.min(100,Math.round((event.received/event.total)*100)):0;
           status.textContent='Baixando atualização... '+percent+'%';
