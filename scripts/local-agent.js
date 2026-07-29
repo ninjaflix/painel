@@ -334,6 +334,8 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
   .tools-content,.tools-toolbar>*,.profile-card>*{min-width:0}
   @media(max-width:980px){
     .agent-top,.shell{width:calc(100% - 28px)!important}
+    .agent-top{position:relative!important;top:auto!important;left:auto!important;transform:none!important}
+    .shell{padding-top:18px!important}
     .top-line{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;grid-template-rows:auto auto!important;gap:12px!important;min-height:0!important;padding:14px!important}
     .brand{grid-column:1!important;grid-row:1!important;min-width:0!important;padding-right:0!important}
     .top-actions{position:static!important;grid-column:2!important;grid-row:1!important;align-self:start!important;min-width:112px!important}
