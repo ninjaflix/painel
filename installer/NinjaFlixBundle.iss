@@ -1,5 +1,5 @@
-#define BundleVersion "1.1.21"
-#define BundleFileVersion "1.1.21.0"
+#define BundleVersion "1.1.22"
+#define BundleFileVersion "1.1.22.0"
 #define AdsPowerVersion "8.6.3"
 #define AdsPowerInstaller "AdsPower-Global-8.6.3-x64.exe"
 #define NinjaExecutable "Ninjaflix Painel.exe"
