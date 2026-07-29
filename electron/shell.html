@@ -20,7 +20,7 @@
     <span class="shell-status-group"><span id="shellBindBadge" class="shell-status warn"><span></span> dispositivo</span><span id="shellApiBadge" class="shell-status warn"><span></span> dashboard</span><span id="shellAdspowerBadge" class="shell-status warn"><span></span> adspower</span><span id="status" class="status">iniciando...</span></span>
   </header>
   <main class="content">
-    <webview id="agentView" partition="persist:ninjaflix-agent" allowpopups></webview>
+    <webview id="agentView" partition="persist:ninjaflix-agent" preload="./webview-preload.js" allowpopups></webview>
   </main>
   <section id="updateOverlay" class="update-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
     <div class="update-card">
@@ -46,8 +46,14 @@
     let availableUpdate = null;
     let updateBusy = false;
     let lastAuthenticated = false;
-    let dismissedVersion = '';
+    let dismissedVersion = localStorage.getItem('ninjaflix:dismissedUpdateVersion') || '';
     let lastActiveRefreshAt = Date.now();
+
+    function sendToAgent(channel, payload) {
+      try {
+        if (view.getURL()) view.send(channel, payload);
+      } catch (_) { /* o webview ainda pode estar inicializando */ }
+    }
 
     function setShellBadge(el, kind, text, detail = '') { if (!el) return; el.className = 'shell-status ' + kind; el.dataset.detail = detail || text; el.tabIndex = 0; el.innerHTML = '<span></span> ' + text; }
 
@@ -188,6 +194,7 @@
     async function boot() {
       homeUrl = await window.ninjaflixAgent.getAgentUrl();
       const appVersion = await window.ninjaflixAgent.getAppVersion();
+      document.querySelector('#currentVersion').textContent = appVersion;
       view.src = homeUrl;
       refreshShellStatuses();
       setInterval(refreshShellStatuses, 15000);
@@ -204,9 +211,17 @@
         const response = await fetch(homeUrl + 'updates/latest', { cache: 'no-store' });
         if (!response.ok) return;
         const result = await response.json();
-        if (!result.updateAvailable || !result.update) return;
-        if (!result.update.mandatory && dismissedVersion === result.update.version) return;
+        if (!result.updateAvailable || !result.update) {
+          availableUpdate = null;
+          sendToAgent('ninjaflix-update-available', null);
+          return;
+        }
         availableUpdate = result.update;
+        sendToAgent('ninjaflix-update-available', {
+          update: availableUpdate,
+          currentVersion: result.currentVersion
+        });
+        if (!result.update.mandatory && dismissedVersion === result.update.version) return;
         document.querySelector('#updateReleaseTitle').textContent = availableUpdate.title || 'Nova versão do Ninjaflix Painel';
         document.querySelector('#currentVersion').textContent = result.currentVersion;
         document.querySelector('#latestVersion').textContent = availableUpdate.version;
@@ -219,11 +234,20 @@
 
     document.querySelector('#updateLater').addEventListener('click', () => {
       dismissedVersion = availableUpdate?.version || '';
+      if (dismissedVersion) localStorage.setItem('ninjaflix:dismissedUpdateVersion', dismissedVersion);
       document.querySelector('#updateOverlay').classList.add('hidden');
     });
-    document.querySelector('#updateNow').addEventListener('click', async () => {
-      if (!availableUpdate || updateBusy) return;
+
+    async function startUpdateInstallation(update = availableUpdate) {
+      if (!update || updateBusy) return;
+      availableUpdate = update;
       updateBusy = true;
+      document.querySelector('#updateReleaseTitle').textContent = availableUpdate.title || 'Nova versão do Ninjaflix Painel';
+      document.querySelector('#latestVersion').textContent = availableUpdate.version || '';
+      document.querySelector('#updateMessage').textContent = availableUpdate.message || '';
+      document.querySelector('#updateMandatory').classList.toggle('hidden', !availableUpdate.mandatory);
+      document.querySelector('#updateLater').classList.toggle('hidden', Boolean(availableUpdate.mandatory));
+      document.querySelector('#updateOverlay').classList.remove('hidden');
       document.querySelector('#updateNow').disabled = true;
       document.querySelector('#updateLater').disabled = true;
       document.querySelector('#updateProgress').classList.remove('hidden');
@@ -235,9 +259,12 @@
         document.querySelector('#updateLater').disabled = Boolean(availableUpdate.mandatory);
         document.querySelector('#updateStatus').textContent = `Não foi possível atualizar: ${error.message}`;
       }
-    });
+    }
+
+    document.querySelector('#updateNow').addEventListener('click', () => startUpdateInstallation());
 
     window.ninjaflixAgent.onUpdateStatus((event) => {
+      sendToAgent('ninjaflix-update-status', event);
       const text = document.querySelector('#updateStatus');
       if (event.status === 'downloading') {
         const percent = Math.min(100, Math.round((event.received / event.total) * 100));
@@ -289,6 +316,11 @@
 
     view.addEventListener('did-navigate', updateNavigation);
     view.addEventListener('did-navigate-in-page', updateNavigation);
+    view.addEventListener('ipc-message', (event) => {
+      if (event.channel !== 'ninjaflix-install-update') return;
+      const update = event.args?.[0];
+      if (update) startUpdateInstallation(update);
+    });
 
     view.addEventListener('new-window', (event) => {
       event.preventDefault();

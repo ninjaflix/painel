@@ -20,7 +20,7 @@ const {
 
 const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const PORT = Number(process.env.AGENT_PORT || 3101);
-const APP_VERSION = process.env.AGENT_VERSION || '1.1.18';
+const APP_VERSION = process.env.AGENT_VERSION || '1.1.19';
 const ADSPOWER_API_PORT = '50326';
 function normalizePortalUrl(value) {
   const raw = String(value || `http://127.0.0.1:${config.port}`).replace(/\/$/, '');
@@ -318,6 +318,43 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
   body.agent-booting .shell::before{content:''!important;width:38px!important;height:38px!important;min-height:0!important;border:4px solid rgba(192,132,252,.20)!important;border-top-color:#c084fc!important;border-radius:999px!important;animation:agentBootSpin .8s linear infinite!important}
   body.agent-booting .shell::after{content:'Carregando painel...'!important;color:#c084fc!important;font-size:13px!important;font-weight:800!important;letter-spacing:.08em!important;text-transform:uppercase!important}
   @keyframes agentBootSpin{to{transform:rotate(360deg)}}
+  html,body{max-width:100%;overflow-x:hidden}
+  .desktop-update-wrap{position:relative;order:2}
+  .desktop-update-wrap.hidden{display:none!important}
+  .desktop-update-button{position:relative!important;border:0!important;background:transparent!important;box-shadow:none!important}
+  .desktop-update-button::before{width:17px;height:17px;background:currentColor;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M12 3v10.2l3.6-3.6L17 11l-6 6-6-6 1.4-1.4 3.6 3.6V3h2Zm-7 16h14v2H5v-2Z'/%3E%3C/svg%3E") center/contain no-repeat;content:''!important}
+  .desktop-update-button.has-update::after{content:'';position:absolute;right:3px;top:2px;width:8px;height:8px;border:2px solid #111223;border-radius:999px;background:#fb7185;box-shadow:0 0 12px rgba(251,113,133,.75)}
+  .desktop-update-dropdown{position:absolute;right:0;top:calc(100% + 10px);z-index:1200;width:min(330px,calc(100vw - 28px));padding:14px;border:1px solid rgba(168,85,247,.42);border-radius:18px;background:#151527;box-shadow:0 24px 70px rgba(0,0,0,.58)}
+  .desktop-update-dropdown h3{margin:0 0 6px;font-size:16px}.desktop-update-dropdown p{margin:0;color:var(--muted-foreground);font-size:12px;line-height:1.45}
+  .desktop-update-version{display:inline-flex;margin:12px 0 8px;padding:5px 9px;border:1px solid rgba(168,85,247,.4);border-radius:999px;color:#d8b4fe;font-size:11px;font-weight:900}
+  .desktop-update-status{min-height:18px;margin-top:8px!important;color:#c4b5fd!important}
+  .desktop-update-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:13px}.desktop-update-actions button{padding:8px 11px}.desktop-update-install{border-color:#a855f7;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff}
+  .top-actions{min-width:112px!important}.notice-wrap{order:1}.profile-wrap{order:3}
+  .agent-top,.shell{width:min(1120px,calc(100% - 48px))!important}
+  .tools-content,.tools-toolbar>*,.profile-card>*{min-width:0}
+  @media(max-width:980px){
+    .agent-top,.shell{width:calc(100% - 28px)!important}
+    .top-line{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;grid-template-rows:auto auto!important;gap:12px!important;min-height:0!important;padding:14px!important}
+    .brand{grid-column:1!important;grid-row:1!important;min-width:0!important;padding-right:0!important}
+    .top-actions{position:static!important;grid-column:2!important;grid-row:1!important;align-self:start!important;min-width:112px!important}
+    .top-info{grid-column:1/-1!important;grid-row:2!important;width:100%!important}
+    .info-row{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;width:100%!important}
+    .header-kernel-status{grid-column:1/-1!important;width:100%!important}
+    .tools-shell{grid-template-columns:1fr!important}.tools-sidebar-wrap{position:static!important}.tools-sidebar{width:100%!important}
+    .tools-toolbar{flex-direction:column!important;margin:22px 0!important}.tools-actions{width:100%!important}.tool-search{width:100%!important;min-width:0!important}
+  }
+  @media(max-width:640px){
+    .agent-top,.shell{width:calc(100% - 20px)!important}
+    .top-line{padding:12px!important;gap:10px!important}.brand-title{font-size:15px!important}.brand-sub{font-size:11px!important}
+    .top-actions{gap:4px!important;min-width:106px!important}.top-icon,.profile-button{width:32px!important;height:32px!important}
+    .info-row{grid-template-columns:1fr!important}.chip{max-width:100%!important;white-space:normal!important;overflow-wrap:anywhere}
+    .main-menu{grid-template-columns:repeat(2,minmax(0,1fr))!important;position:static!important}
+    .tools-toolbar h1{font-size:clamp(25px,8vw,32px)!important}.tools-actions{display:grid!important;grid-template-columns:1fr!important}
+    .tools-grid{grid-template-columns:1fr!important}.tools-grid .profile-card{grid-template-columns:56px minmax(0,1fr)!important;padding:18px!important}
+    .tools-grid .tool-icon{width:52px!important;height:52px!important}.tools-grid .tool-title{font-size:19px!important;margin-top:68px!important}
+    .notice-dropdown,.desktop-update-dropdown,.profile-dropdown{position:fixed!important;left:10px!important;right:10px!important;top:76px!important;width:auto!important;max-height:calc(100vh - 96px)!important;overflow:auto!important}
+    .modal-backdrop{padding:10px!important}.agent-modal{width:100%!important;max-height:calc(100vh - 20px)!important;padding:16px!important}
+  }
   </style>
 </head>
 <body class="agent-booting">
@@ -333,7 +370,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
     window.addEventListener('unhandledrejection',()=>window.finishAgentBoot());
   </script>
   <div id="kernelInstallOverlay" class="kernel-install-overlay hidden" role="dialog" aria-modal="true" aria-live="polite"><section class="kernel-install-card"><h2 id="kernelInstallTitle">Preparando seu navegador</h2><p id="kernelInstallMessage">Aguarde enquanto preparamos tudo para abrir seu perfil.</p><div class="kernel-install-track"><span id="kernelInstallProgress" class="kernel-install-progress"></span></div><span id="kernelInstallPercent" class="kernel-install-percent">0%</span></section></div>
-  <header class="agent-top"><div class="agent-frame"><div class="top-line"><div class="brand"><div class="logo"><img src="/logo-roxo.svg" alt="Ninjaflix" /></div><div><div class="brand-title">Ninjaflix</div><div class="brand-sub muted">Dashboard de ferramentas</div></div></div><div class="top-info"><div class="info-row"><div class="chip"><span>Pacote:</span> <strong id="clientPackage">-</strong></div><div class="chip"><span>Validade:</span> <strong id="subscriptionInfo">-</strong></div><div id="headerKernelStatus" class="header-kernel-status hidden"></div></div></div><div class="top-actions"><div class="notice-wrap"><button id="noticeButton" class="top-icon" title="Avisos">Avisos</button><div id="noticeDropdown" class="notice-dropdown hidden"><div class="notice-dropdown-title">Avisos recentes</div><div id="noticeDropdownList" class="notice-list"><div class="notice-item"><strong>Carregando...</strong></div></div></div></div><div class="profile-wrap"><button id="profileButton" class="profile-button" title="Perfil do cliente">Perfil</button><div id="profileDropdown" class="profile-dropdown hidden"><div class="profile-head"><div class="profile-avatar">P</div><div><strong id="profileName">Cliente</strong><small id="profileEmail">-</small></div></div><div class="profile-row"><span>Pacote</span><strong id="profilePackage">-</strong></div><div class="profile-row"><span>Validade</span><strong id="profileValidity">-</strong></div><button id="profileLogoutButton" class="danger profile-logout">Sair do agente</button></div></div></div></div><nav class="main-menu"><button class="active" data-panel="tools">Ferramentas</button><button data-launch="financeiro">Financeiro</button><button data-launch="suporte">Suporte</button><button data-launch="tutoriais">Tutoriais</button></nav></div></header>
+  <header class="agent-top"><div class="agent-frame"><div class="top-line"><div class="brand"><div class="logo"><img src="/logo-roxo.svg" alt="Ninjaflix" /></div><div><div class="brand-title">Ninjaflix</div><div class="brand-sub muted">Dashboard de ferramentas</div></div></div><div class="top-info"><div class="info-row"><div class="chip"><span>Pacote:</span> <strong id="clientPackage">-</strong></div><div class="chip"><span>Validade:</span> <strong id="subscriptionInfo">-</strong></div><div id="headerKernelStatus" class="header-kernel-status hidden"></div></div></div><div class="top-actions"><div class="notice-wrap"><button id="noticeButton" class="top-icon" title="Avisos">Avisos</button><div id="noticeDropdown" class="notice-dropdown hidden"><div class="notice-dropdown-title">Avisos recentes</div><div id="noticeDropdownList" class="notice-list"><div class="notice-item"><strong>Carregando...</strong></div></div></div></div><div id="desktopUpdateWrap" class="desktop-update-wrap hidden"><button id="desktopUpdateButton" class="top-icon desktop-update-button" title="Atualizações" aria-label="Atualizações">Atualizações</button><div id="desktopUpdateDropdown" class="desktop-update-dropdown hidden"><h3>Atualização pendente</h3><p id="desktopUpdateTitle">Uma nova versão está pronta.</p><span id="desktopUpdateVersion" class="desktop-update-version"></span><p id="desktopUpdateMessage"></p><p id="desktopUpdateStatus" class="desktop-update-status"></p><div class="desktop-update-actions"><button id="desktopUpdateLater" type="button">Agora não</button><button id="desktopUpdateInstall" class="desktop-update-install" type="button">Atualizar agora</button></div></div></div><div class="profile-wrap"><button id="profileButton" class="profile-button" title="Perfil do cliente">Perfil</button><div id="profileDropdown" class="profile-dropdown hidden"><div class="profile-head"><div class="profile-avatar">P</div><div><strong id="profileName">Cliente</strong><small id="profileEmail">-</small></div></div><div class="profile-row"><span>Pacote</span><strong id="profilePackage">-</strong></div><div class="profile-row"><span>Validade</span><strong id="profileValidity">-</strong></div><button id="profileLogoutButton" class="danger profile-logout">Sair do agente</button></div></div></div></div><nav class="main-menu"><button class="active" data-panel="tools">Ferramentas</button><button data-launch="financeiro">Financeiro</button><button data-launch="suporte">Suporte</button><button data-launch="tutoriais">Tutoriais</button></nav></div></header>
   <main class="shell"><section id="activationCard" class="login-card"><form id="activationForm" class="login-form"><input name="email" type="email" autocomplete="email" placeholder="E-mail usado no checkout" required /><button>Entrar e vincular maquina</button></form></section><section id="agentCard" class="tools-shell hidden"><div class="tools-sidebar-wrap"><aside class="tools-sidebar"><div class="sidebar-title">Categorias</div><div id="categoryList"></div></aside><div id="kernelStatus" class="kernel-status hidden" role="status" aria-live="polite"></div></div><section class="tools-content"><div class="tools-toolbar"><div><h1 id="toolsTitle">Plano ativo</h1><p id="toolsSubtitle" class="muted">Ferramentas prontas - organizadas por categoria</p></div><div class="tools-actions"><input id="toolSearch" class="tool-search" placeholder="Buscar ferramenta..." /><button id="refreshProfiles" class="secondary">Atualizar</button></div></div><div id="profilesList"></div><pre id="resultBox" class="hidden"></pre></section></section><section id="debugCard" class="card hidden"><h2>Debug da maquina</h2><button id="debugButton" class="secondary">Comparar com portal</button><pre id="debugBox"></pre></section></main>
   <div id="noticeModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="noticeModalTitle"><section class="agent-modal"><div class="modal-head"><div><h2 id="noticeModalTitle">Avisos e novidades</h2><p class="muted">Ultimas noticias e informacoes enviadas pelo painel admin agente.</p></div><button class="modal-close" data-close-modal="noticeModal">x</button></div><div id="noticeList" class="notice-list"><div class="notice-item"><strong>Carregando avisos...</strong><p>Aguarde enquanto buscamos as ultimas informacoes.</p></div></div></section></div>
   <div id="agentPopupModal" class="modal-backdrop agent-popup hidden" role="dialog" aria-modal="true" aria-labelledby="agentPopupTitle"><section class="agent-modal"><div class="modal-head"><div><h2 id="agentPopupTitle">Aviso</h2></div><button class="modal-close" data-close-modal="agentPopupModal">x</button></div><div id="agentPopupBody" class="notice-list"></div><a id="agentPopupCta" class="popup-cta hidden" href="#" target="_blank" rel="noopener">Abrir link</a></section></div>
@@ -673,6 +710,54 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
       if(fallback)window.location.href=fallback;
     },true);
     async function reconcileAgentAccess(){try{const h=await fetch('/health',{cache:'no-store'}).then(r=>r.json());const panelWasOpen=!document.querySelector('#agentCard')?.classList.contains('hidden');if(h.accessIssue){renderAgentAccessIssue(h.accessIssue,h.user);return}if(h.canAccessService===false){showExpiredSubscription(h.user||{});return}if(h.canAccessService===true&&String(toolsTitle?.textContent||'').includes('Assinatura vencida')){window.location.reload();return}if((h.user&&!h.authenticated)||(!h.authenticated&&panelWasOpen))renderAgentAccessIssue({code:'session_invalid',message:h.error||'Este dispositivo perdeu a autorização. Chame o suporte.'},h.user);else if(!h.authenticated&&headerKernelStatus?.textContent?.includes('AdsPower'))setKernelStatus('','','','')}catch{}}
+    (function setupDesktopUpdateCenter(){
+      const bridge=window.ninjaflixDesktop;
+      const wrap=document.querySelector('#desktopUpdateWrap');
+      const button=document.querySelector('#desktopUpdateButton');
+      const dropdown=document.querySelector('#desktopUpdateDropdown');
+      const install=document.querySelector('#desktopUpdateInstall');
+      const later=document.querySelector('#desktopUpdateLater');
+      const title=document.querySelector('#desktopUpdateTitle');
+      const version=document.querySelector('#desktopUpdateVersion');
+      const message=document.querySelector('#desktopUpdateMessage');
+      const status=document.querySelector('#desktopUpdateStatus');
+      if(!bridge||!wrap||!button)return;
+      let pending=null;
+      function render(payload){
+        pending=payload?.update||null;
+        wrap.classList.toggle('hidden',!pending);
+        button.classList.toggle('has-update',Boolean(pending));
+        if(!pending){dropdown.classList.add('hidden');return}
+        title.textContent=pending.title||'Nova versão do Ninjaflix Painel';
+        version.textContent='Versão '+String(pending.version||'');
+        message.textContent=pending.message||'Você pode instalar agora ou deixar para mais tarde.';
+        install.disabled=false;
+        status.textContent='';
+      }
+      async function refresh(){
+        try{const payload=await req('/updates/latest');render(payload.updateAvailable?payload:null)}catch{}
+      }
+      button.addEventListener('click',event=>{event.stopPropagation();dropdown.classList.toggle('hidden')});
+      later.addEventListener('click',()=>dropdown.classList.add('hidden'));
+      install.addEventListener('click',()=>{
+        if(!pending)return;
+        install.disabled=true;
+        status.textContent='Preparando atualização...';
+        bridge.installUpdate(pending);
+      });
+      document.addEventListener('click',event=>{if(!event.target.closest('.desktop-update-wrap'))dropdown.classList.add('hidden')});
+      bridge.onUpdateAvailable(render);
+      bridge.onUpdateStatus(event=>{
+        if(event?.status==='downloading'){
+          const percent=event.total?Math.min(100,Math.round((event.received/event.total)*100)):0;
+          status.textContent='Baixando atualização... '+percent+'%';
+        }else if(event?.status==='installing')status.textContent='Instalando; o painel será reiniciado...';
+        else if(event?.status==='error'){status.textContent='Falha: '+(event.message||'tente novamente');install.disabled=false}
+      });
+      refresh();
+      setInterval(refresh,5*60*1000);
+      window.addEventListener('focus',refresh);
+    })();
     setTimeout(reconcileAgentAccess,1200);
     setInterval(reconcileAgentAccess,5000);
   </script>
