@@ -28,7 +28,7 @@ if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar instalador Electron." }
 Write-Host "Instalador gerado em: dist-electron"
 Write-Host "Esta primeira versao NAO inclui ADSPower embutido. O ADSPower deve estar instalado e com API local ativa."
 
-$updateInstaller = Join-Path $root 'dist-electron\NinjaFlixPainelSetup-1.1.20.exe'
+$updateInstaller = Join-Path $root 'dist-electron\NinjaFlixPainelSetup-1.1.21.exe'
 $releaseDir = Join-Path $root 'ARQUIVOS-GERADOS\1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN'
 if (!(Test-Path -LiteralPath $updateInstaller)) { throw "Atualizador leve nao foi encontrado: $updateInstaller" }
 New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null

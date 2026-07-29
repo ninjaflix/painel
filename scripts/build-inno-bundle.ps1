@@ -26,7 +26,7 @@ if ($adsSignature.SignerCertificate.Subject -notmatch 'SUNFLOWER TECH PTE\. LTD\
 & $compiler $issFile
 if ($LASTEXITCODE -ne 0) { throw "Compilacao Inno Setup falhou com codigo $LASTEXITCODE." }
 
-$output = Join-Path $projectRoot 'dist-bundle\NinjaFlixCompletoSetup-1.1.20.exe'
+$output = Join-Path $projectRoot 'dist-bundle\NinjaFlixCompletoSetup-1.1.21.exe'
 if (-not (Test-Path -LiteralPath $output)) { throw 'Instalador unificado nao foi gerado.' }
 $outputHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $output).Hash
 Write-Output "Gerado: $output"

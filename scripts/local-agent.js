@@ -20,7 +20,7 @@ const {
 
 const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const PORT = Number(process.env.AGENT_PORT || 3101);
-const APP_VERSION = process.env.AGENT_VERSION || '1.1.20';
+const APP_VERSION = process.env.AGENT_VERSION || '1.1.21';
 const ADSPOWER_API_PORT = '50326';
 function normalizePortalUrl(value) {
   const raw = String(value || `http://127.0.0.1:${config.port}`).replace(/\/$/, '');
@@ -330,8 +330,11 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
   .desktop-update-status{min-height:18px;margin-top:8px!important;color:#c4b5fd!important}
   .desktop-update-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:13px}.desktop-update-actions button{padding:8px 11px}.desktop-update-install{border-color:#a855f7;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff}
   .top-actions{min-width:112px!important}.notice-wrap{order:1}.profile-wrap{order:3}
-  .agent-top,.shell{width:min(1560px,calc(100% - 48px))!important}
+  .agent-top{width:min(1560px,calc(100% - 48px))!important}
+  main.shell{width:auto!important;max-width:none!important;margin-left:50px!important;margin-right:50px!important}
   .tools-shell{grid-template-columns:220px minmax(0,1fr)!important}
+  .tools-sidebar-wrap{width:100%!important;max-width:100%!important;min-width:0!important}
+  .tools-sidebar{box-sizing:border-box!important;width:100%!important;max-width:100%!important;min-width:0!important}
   .tools-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}
   .tools-content,.tools-toolbar>*,.profile-card>*{min-width:0}
   @media(max-width:1399px){
@@ -344,7 +347,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
     .tools-actions{width:100%!important}.tool-search{width:100%!important;min-width:0!important}
   }
   @media(max-width:980px){
-    .agent-top,.shell{width:calc(100% - 28px)!important}
+    .agent-top{width:calc(100% - 28px)!important}
     .agent-top{position:relative!important;top:auto!important;left:auto!important;transform:none!important}
     .shell{padding-top:18px!important}
     .top-line{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;grid-template-rows:auto auto!important;gap:12px!important;min-height:0!important;padding:14px!important}
@@ -362,7 +365,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
     .tools-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
   }
   @media(max-width:640px){
-    .agent-top,.shell{width:calc(100% - 20px)!important}
+    .agent-top{width:calc(100% - 20px)!important}
     .top-line{padding:12px!important;gap:10px!important}.brand-title{font-size:15px!important}.brand-sub{font-size:11px!important}
     .top-actions{gap:4px!important;min-width:106px!important}.top-icon,.profile-button{width:32px!important;height:32px!important}
     .info-row{grid-template-columns:1fr!important}.chip{max-width:100%!important;white-space:normal!important;overflow-wrap:anywhere}
