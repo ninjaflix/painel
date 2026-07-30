@@ -46,14 +46,51 @@ jobs:
           find ARQUIVOS-GERADOS -maxdepth 6 -type f -print
           du -sh ARQUIVOS-GERADOS
 
-      - name: Disponibilizar arquivos para download
+      - name: Preparar partes do instalador completo
+        run: |
+          mkdir -p "$RUNNER_TEMP/ninjaflix-intel-parts"
+          split -b 240m \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/NinjaFlixCompletoSetup-1.1.22-mac-x64.pkg \
+            "$RUNNER_TEMP/ninjaflix-intel-parts/NinjaFlixCompletoSetup-1.1.22-mac-x64.pkg.part-"
+          test -f "$RUNNER_TEMP/ninjaflix-intel-parts/NinjaFlixCompletoSetup-1.1.22-mac-x64.pkg.part-aa"
+          test -f "$RUNNER_TEMP/ninjaflix-intel-parts/NinjaFlixCompletoSetup-1.1.22-mac-x64.pkg.part-ab"
+          test -f "$RUNNER_TEMP/ninjaflix-intel-parts/NinjaFlixCompletoSetup-1.1.22-mac-x64.pkg.part-ac"
+          test ! -f "$RUNNER_TEMP/ninjaflix-intel-parts/NinjaFlixCompletoSetup-1.1.22-mac-x64.pkg.part-ad"
+
+      - name: Disponibilizar atualizacao e checksum
         uses: actions/upload-artifact@v4
         with:
-          name: NinjaFlix-macOS-Intel-1.1.22-${{ github.run_number }}
+          name: NinjaFlix-macOS-Intel-1.1.22-update-${{ github.run_number }}
           path: |
             ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-x64.zip
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-x64.pkg
             ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-x64.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Disponibilizar PKG parte AA
+        uses: actions/upload-artifact@v4
+        with:
+          name: NinjaFlix-macOS-Intel-1.1.22-pkg-part-aa-${{ github.run_number }}
+          path: ${{ runner.temp }}/ninjaflix-intel-parts/NinjaFlixCompletoSetup-1.1.22-mac-x64.pkg.part-aa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Disponibilizar PKG parte AB
+        uses: actions/upload-artifact@v4
+        with:
+          name: NinjaFlix-macOS-Intel-1.1.22-pkg-part-ab-${{ github.run_number }}
+          path: ${{ runner.temp }}/ninjaflix-intel-parts/NinjaFlixCompletoSetup-1.1.22-mac-x64.pkg.part-ab
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Disponibilizar PKG parte AC
+        uses: actions/upload-artifact@v4
+        with:
+          name: NinjaFlix-macOS-Intel-1.1.22-pkg-part-ac-${{ github.run_number }}
+          path: ${{ runner.temp }}/ninjaflix-intel-parts/NinjaFlixCompletoSetup-1.1.22-mac-x64.pkg.part-ac
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
