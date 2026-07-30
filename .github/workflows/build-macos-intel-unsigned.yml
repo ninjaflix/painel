@@ -2,6 +2,9 @@ name: Compilar macOS Intel nao assinado
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-macos-intel-unsigned.yml"
 
 permissions:
   contents: read
@@ -20,6 +23,11 @@ jobs:
     steps:
       - name: Baixar codigo
         uses: actions/checkout@v6
+
+      - name: Confirmar arquitetura e versao
+        run: |
+          test "$(uname -m)" = "x86_64"
+          node -p "require('./package.json').version" | grep -qx "1.1.22"
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -41,11 +49,11 @@ jobs:
       - name: Disponibilizar arquivos para download
         uses: actions/upload-artifact@v4
         with:
-          name: NinjaFlix-macOS-Intel-nao-assinado-${{ github.run_number }}
+          name: NinjaFlix-macOS-Intel-1.1.22-${{ github.run_number }}
           path: |
-            ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*.zip
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*.pkg
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*.txt
+            ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-x64.zip
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-x64.pkg
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-x64.txt
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
