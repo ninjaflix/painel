@@ -5,6 +5,13 @@ on:
   push:
     paths:
       - ".github/workflows/build-linux-x64.yml"
+      - "scripts/build-linux.sh"
+      - "electron/**"
+      - "scripts/local-agent.js"
+      - "src/**"
+      - "public/**"
+      - "package.json"
+      - "package-lock.json"
 
 permissions:
   contents: read

@@ -32,7 +32,7 @@ rm -f "$UPDATE_FILE" "$COMPLETE_FILE" "$CHECKSUM_FILE"
 
 npm run check
 node --check electron/main.js
-npx electron-builder --linux AppImage --x64 --config.directories.output="$BUILD_DIR/electron"
+npx electron-builder --linux AppImage --x64 --publish never --config.directories.output="$BUILD_DIR/electron"
 
 GENERATED_APPIMAGE="$(find "$BUILD_DIR/electron" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
 test -n "$GENERATED_APPIMAGE"
