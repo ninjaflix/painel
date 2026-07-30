@@ -53,15 +53,15 @@ jobs:
         run: |
           find ARQUIVOS-GERADOS -maxdepth 6 -type f -print
           file ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/LINUX/NinjaFlixPainelUpdate-1.1.22-linux-x64.AppImage
-          dpkg-deb -I ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/NinjaFlixCompletoSetup-1.1.22-linux-x64.deb
+          tar -tzf ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/NinjaFlixCompletoSetup-1.1.22-linux-x64.tar.gz
 
       - name: Preparar partes do instalador completo
         run: |
           mkdir -p "$RUNNER_TEMP/ninjaflix-linux-parts"
           split -b 180m \
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/NinjaFlixCompletoSetup-1.1.22-linux-x64.deb \
-            "$RUNNER_TEMP/ninjaflix-linux-parts/NinjaFlixCompletoSetup-1.1.22-linux-x64.deb.part-"
-          test -f "$RUNNER_TEMP/ninjaflix-linux-parts/NinjaFlixCompletoSetup-1.1.22-linux-x64.deb.part-aa"
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/NinjaFlixCompletoSetup-1.1.22-linux-x64.tar.gz \
+            "$RUNNER_TEMP/ninjaflix-linux-parts/NinjaFlixCompletoSetup-1.1.22-linux-x64.tar.gz.part-"
+          test -f "$RUNNER_TEMP/ninjaflix-linux-parts/NinjaFlixCompletoSetup-1.1.22-linux-x64.tar.gz.part-aa"
 
       - name: Disponibilizar atualizacao e checksum
         uses: actions/upload-artifact@v4
@@ -74,37 +74,37 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-      - name: Disponibilizar DEB parte AA
+      - name: Disponibilizar instalador parte AA
         uses: actions/upload-artifact@v4
         with:
-          name: NinjaFlix-Linux-x64-1.1.22-deb-part-aa-${{ github.run_number }}
+          name: NinjaFlix-Linux-x64-1.1.22-completo-part-aa-${{ github.run_number }}
           path: ${{ runner.temp }}/ninjaflix-linux-parts/*.part-aa
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
 
-      - name: Disponibilizar DEB parte AB
+      - name: Disponibilizar instalador parte AB
         uses: actions/upload-artifact@v4
         with:
-          name: NinjaFlix-Linux-x64-1.1.22-deb-part-ab-${{ github.run_number }}
+          name: NinjaFlix-Linux-x64-1.1.22-completo-part-ab-${{ github.run_number }}
           path: ${{ runner.temp }}/ninjaflix-linux-parts/*.part-ab
           if-no-files-found: ignore
           compression-level: 0
           retention-days: 7
 
-      - name: Disponibilizar DEB parte AC
+      - name: Disponibilizar instalador parte AC
         uses: actions/upload-artifact@v4
         with:
-          name: NinjaFlix-Linux-x64-1.1.22-deb-part-ac-${{ github.run_number }}
+          name: NinjaFlix-Linux-x64-1.1.22-completo-part-ac-${{ github.run_number }}
           path: ${{ runner.temp }}/ninjaflix-linux-parts/*.part-ac
           if-no-files-found: ignore
           compression-level: 0
           retention-days: 7
 
-      - name: Disponibilizar DEB parte AD
+      - name: Disponibilizar instalador parte AD
         uses: actions/upload-artifact@v4
         with:
-          name: NinjaFlix-Linux-x64-1.1.22-deb-part-ad-${{ github.run_number }}
+          name: NinjaFlix-Linux-x64-1.1.22-completo-part-ad-${{ github.run_number }}
           path: ${{ runner.temp }}/ninjaflix-linux-parts/*.part-ad
           if-no-files-found: ignore
           compression-level: 0

@@ -15,7 +15,7 @@ UPDATE_DIR="$ROOT/ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/LINUX"
 COMPLETE_DIR="$ROOT/ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX"
 BUILD_DIR="$ROOT/dist-linux"
 UPDATE_FILE="$UPDATE_DIR/NinjaFlixPainelUpdate-${VERSION}-linux-x64.AppImage"
-COMPLETE_FILE="$COMPLETE_DIR/NinjaFlixCompletoSetup-${VERSION}-linux-x64.deb"
+COMPLETE_FILE="$COMPLETE_DIR/NinjaFlixCompletoSetup-${VERSION}-linux-x64.tar.gz"
 CHECKSUM_FILE="$COMPLETE_DIR/SHA256-${VERSION}-linux-x64.txt"
 ADSPOWER_URL="${ADSPOWER_LINUX_X64_URL:-https://version.adspower.net/software/linux-x64-global/8.6.3/AdsPower-Global-8.6.3-x64.deb}"
 
@@ -42,85 +42,57 @@ ADSPOWER_DEB="$BUILD_DIR/AdsPower-Global-8.6.3-x64.deb"
 curl --fail --location --retry 4 --retry-delay 3 --output "$ADSPOWER_DEB" "$ADSPOWER_URL"
 test "$(dpkg-deb -f "$ADSPOWER_DEB" Architecture)" = "amd64"
 
-STAGE="$BUILD_DIR/complete-stage"
-CONTROL_SOURCE="$BUILD_DIR/adspower-control"
-mkdir -p "$STAGE/DEBIAN" "$CONTROL_SOURCE"
-dpkg-deb -x "$ADSPOWER_DEB" "$STAGE"
-dpkg-deb -e "$ADSPOWER_DEB" "$CONTROL_SOURCE"
+BUNDLE="$BUILD_DIR/NinjaFlixCompletoSetup-${VERSION}-linux-x64"
+mkdir -p "$BUNDLE"
+install -m 755 "$UPDATE_FILE" "$BUNDLE/NinjaFlixPainel.AppImage"
+install -m 644 "$ADSPOWER_DEB" "$BUNDLE/AdsPower-Global-8.6.3-x64.deb"
+install -m 644 build/logo-roxo-1024.png "$BUNDLE/ninjaflix-painel.png"
 
-ADSPOWER_DEPENDS="$(dpkg-deb -f "$ADSPOWER_DEB" Depends 2>/dev/null || true)"
-ADSPOWER_PREDEPENDS="$(dpkg-deb -f "$ADSPOWER_DEB" Pre-Depends 2>/dev/null || true)"
-ADSPOWER_INSTALLED_SIZE="$(dpkg-deb -f "$ADSPOWER_DEB" Installed-Size 2>/dev/null || echo 0)"
-PANEL_SIZE="$(du -sk "$UPDATE_FILE" | awk '{print $1}')"
-INSTALLED_SIZE="$(( ${ADSPOWER_INSTALLED_SIZE:-0} + PANEL_SIZE ))"
+cat > "$BUNDLE/install.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
 
-for maintainer_script in preinst prerm postrm; do
-  if [[ -f "$CONTROL_SOURCE/$maintainer_script" ]]; then
-    cp "$CONTROL_SOURCE/$maintainer_script" "$STAGE/DEBIAN/$maintainer_script"
-    chmod 755 "$STAGE/DEBIAN/$maintainer_script"
-  fi
-done
-if [[ -f "$CONTROL_SOURCE/postinst" ]]; then
-  sed '/^[[:space:]]*exit[[:space:]]\+0[[:space:]]*$/d' "$CONTROL_SOURCE/postinst" > "$STAGE/DEBIAN/postinst"
-else
-  printf '#!/bin/sh\nset -e\n' > "$STAGE/DEBIAN/postinst"
+if [[ "$(uname -m)" != "x86_64" ]]; then
+  echo "Este instalador requer Linux x64." >&2
+  exit 2
+fi
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  exec sudo bash "$0" "$@"
 fi
 
-mkdir -p \
-  "$STAGE/opt/ninjaflix-painel" \
-  "$STAGE/usr/bin" \
-  "$STAGE/usr/share/applications" \
-  "$STAGE/usr/share/icons/hicolor/512x512/apps"
-install -m 755 "$UPDATE_FILE" "$STAGE/opt/ninjaflix-painel/NinjaFlixPainel.AppImage"
-install -m 644 build/logo-roxo-1024.png "$STAGE/usr/share/icons/hicolor/512x512/apps/ninjaflix-painel.png"
-cat > "$STAGE/usr/bin/ninjaflix-painel" <<'EOF'
-#!/bin/sh
-exec /opt/ninjaflix-painel/NinjaFlixPainel.AppImage "$@"
-EOF
-chmod 755 "$STAGE/usr/bin/ninjaflix-painel"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+if apt-cache show libfuse2t64 >/dev/null 2>&1; then
+  apt-get install -y libfuse2t64
+else
+  apt-get install -y libfuse2
+fi
+apt-get install -y "$HERE/AdsPower-Global-8.6.3-x64.deb"
 
-cat > "$STAGE/usr/share/applications/ninjaflix-painel.desktop" <<'EOF'
+install -d /opt/ninjaflix-painel /usr/share/applications /usr/share/icons/hicolor/512x512/apps
+install -m 755 "$HERE/NinjaFlixPainel.AppImage" /opt/ninjaflix-painel/NinjaFlixPainel.AppImage
+install -m 644 "$HERE/ninjaflix-painel.png" /usr/share/icons/hicolor/512x512/apps/ninjaflix-painel.png
+cat > /usr/share/applications/ninjaflix-painel.desktop <<'DESKTOP'
 [Desktop Entry]
 Name=Ninjaflix Painel
 Comment=Painel de ferramentas NinjaFlix
-Exec=/usr/bin/ninjaflix-painel
+Exec=/opt/ninjaflix-painel/NinjaFlixPainel.AppImage
 Icon=ninjaflix-painel
 Terminal=false
 Type=Application
 Categories=Utility;
 StartupWMClass=ninjaflix-painel
-EOF
-
-{
-  echo "Package: ninjaflix-completo"
-  echo "Version: $VERSION"
-  echo "Section: utils"
-  echo "Priority: optional"
-  echo "Architecture: amd64"
-  echo "Installed-Size: $INSTALLED_SIZE"
-  echo "Maintainer: NinjaFlix"
-  [[ -z "$ADSPOWER_PREDEPENDS" ]] || echo "Pre-Depends: $ADSPOWER_PREDEPENDS"
-  if [[ -n "$ADSPOWER_DEPENDS" ]]; then
-    echo "Depends: $ADSPOWER_DEPENDS, libfuse2 | libfuse2t64"
-  else
-    echo "Depends: libfuse2 | libfuse2t64"
-  fi
-  echo "Provides: ninjaflix-painel"
-  echo "Description: NinjaFlix Painel com AdsPower Global"
-  echo " Instalacao completa para novos clientes NinjaFlix."
-} > "$STAGE/DEBIAN/control"
-
-cat >> "$STAGE/DEBIAN/postinst" <<'EOF'
-chmod 755 /opt/ninjaflix-painel/NinjaFlixPainel.AppImage
+DESKTOP
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true
-exit 0
+echo "Ninjaflix Painel e AdsPower instalados com sucesso."
 EOF
-chmod 755 "$STAGE/DEBIAN/postinst"
+chmod 755 "$BUNDLE/install.sh"
 
-dpkg-deb --build --root-owner-group "$STAGE" "$COMPLETE_FILE"
-test "$(dpkg-deb -f "$COMPLETE_FILE" Architecture)" = "amd64"
-dpkg-deb -c "$COMPLETE_FILE" | grep -q 'opt/ninjaflix-painel/NinjaFlixPainel.AppImage'
-dpkg-deb -c "$COMPLETE_FILE" | grep -qi 'adspower'
+tar -C "$BUILD_DIR" -czf "$COMPLETE_FILE" "$(basename "$BUNDLE")"
+tar -tzf "$COMPLETE_FILE" | grep -q '/install.sh$'
+tar -tzf "$COMPLETE_FILE" | grep -q '/AdsPower-Global-8.6.3-x64.deb$'
+tar -tzf "$COMPLETE_FILE" | grep -q '/NinjaFlixPainel.AppImage$'
 
 (
   cd "$UPDATE_DIR"
