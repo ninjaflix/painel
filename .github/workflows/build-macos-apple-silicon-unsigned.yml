@@ -1,0 +1,59 @@
+name: Compilar macOS Apple Silicon nao assinado
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-macos-apple-silicon-unsigned.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Painel e instalador completo Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    env:
+      MAC_ALLOW_UNSIGNED: "1"
+      ADSPOWER_MAC_ARM64_URL: "https://version.adspower.net/software/darwin-arm64-global/8.6.3/AdsPower-Global-8.6.3-arm64.dmg"
+      ADSPOWER_MAC_ARM64_SHA256: "c2cfb801bb1bd5ab95fa3a7319466479229a16a8a63ea929650b8773c0bf022d"
+
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v6
+
+      - name: Confirmar arquitetura
+        run: |
+          test "$(uname -m)" = "arm64"
+          node -p "require('./package.json').version" | grep -qx "1.1.22"
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar macOS Apple Silicon
+        run: npm run build:mac:apple
+
+      - name: Mostrar arquivos gerados
+        run: |
+          find ARQUIVOS-GERADOS -maxdepth 6 -type f -print
+          du -sh ARQUIVOS-GERADOS
+
+      - name: Disponibilizar arquivos para download
+        uses: actions/upload-artifact@v4
+        with:
+          name: NinjaFlix-macOS-Apple-Silicon-1.1.22-${{ github.run_number }}
+          path: |
+            ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-arm64.zip
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-arm64.pkg
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-arm64.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
