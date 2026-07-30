@@ -1262,6 +1262,27 @@ function adspowerExecutableCandidates() {
       );
     }
   }
+  if (process.platform === 'linux') {
+    candidates.push(
+      '/opt/AdsPower Global/adspower_global',
+      '/opt/AdsPower Global/AdsPower Global',
+      '/opt/adspower_global/adspower_global',
+      '/opt/adspower/adspower',
+      '/usr/bin/adspower_global',
+      '/usr/bin/adspower'
+    );
+    for (const desktopFile of [
+      '/usr/share/applications/adspower_global.desktop',
+      '/usr/share/applications/adspower.desktop',
+      path.join(os.homedir(), '.local', 'share', 'applications', 'adspower_global.desktop')
+    ]) {
+      try {
+        if (!fs.existsSync(desktopFile)) continue;
+        const match = fs.readFileSync(desktopFile, 'utf8').match(/^Exec=(?:"([^"]+)"|([^\s%]+))/m);
+        if (match) candidates.push(match[1] || match[2]);
+      } catch (_) {}
+    }
+  }
   return Array.from(new Set(candidates.filter(Boolean)));
 }
 
@@ -1275,6 +1296,9 @@ function adspowerKernelRoot() {
   if (process.platform === 'darwin') {
     return process.env.ADSPOWER_KERNEL_ROOT || path.join(os.homedir(), 'Library', 'Application Support', 'adspower_global', 'cwd_global');
   }
+  if (process.platform === 'linux') {
+    return process.env.ADSPOWER_KERNEL_ROOT || path.join(os.homedir(), '.config', 'adspower_global', 'cwd_global');
+  }
   return process.env.ADSPOWER_KERNEL_ROOT || path.join(process.env.APPDATA || os.homedir(), 'adspower_global', 'cwd_global');
 }
 
@@ -1283,7 +1307,7 @@ function installedKernelPath(version = expectedKernelVersion()) {
 }
 
 function kernelIsInstalled(version = expectedKernelVersion(), build = '') {
-  if (process.platform === 'darwin') return true;
+  if (['darwin', 'linux'].includes(process.platform)) return true;
   const root = installedKernelPath(version);
   const marker = path.join(root, 'update_version_key');
   if (!fs.existsSync(path.join(root, 'SunBrowser.exe')) || !fs.existsSync(path.join(root, 'chromedriver.exe')) || !fs.existsSync(marker)) return false;
@@ -1373,7 +1397,7 @@ async function extractAndValidateKernel(zipPath, temporaryRoot, item) {
 
 let kernelInstallInFlight = null;
 async function ensureKernelPackageInstalled(version = expectedKernelVersion()) {
-  if (process.platform === 'darwin') {
+  if (['darwin', 'linux'].includes(process.platform)) {
     return { installed: true, alreadyInstalled: true, managedByAdspower: true };
   }
   if (kernelIsInstalled(version)) return { installed: true, alreadyInstalled: true };
@@ -1415,9 +1439,10 @@ async function ensureKernelPackageInstalled(version = expectedKernelVersion()) {
 }
 
 function isAdspowerProcessRunning() {
-  if (process.platform === 'darwin') {
+  if (['darwin', 'linux'].includes(process.platform)) {
     return new Promise((resolve) => {
-      execFile('/usr/bin/pgrep', ['-if', 'AdsPower|SunBrowser'], { timeout: 5000 }, (error, stdout = '') => {
+      const pgrepPath = process.platform === 'darwin' ? '/usr/bin/pgrep' : 'pgrep';
+      execFile(pgrepPath, ['-if', 'AdsPower|SunBrowser'], { timeout: 5000 }, (error, stdout = '') => {
         resolve(!error && /\d/.test(String(stdout)));
       });
     });
@@ -1434,9 +1459,10 @@ function isAdspowerProcessRunning() {
 }
 
 function stopAdspowerProcesses() {
-  if (process.platform === 'darwin') {
+  if (['darwin', 'linux'].includes(process.platform)) {
     return new Promise((resolve) => {
-      execFile('/usr/bin/pkill', ['-f', 'AdsPower|SunBrowser'], { timeout: 15000 }, () => resolve());
+      const pkillPath = process.platform === 'darwin' ? '/usr/bin/pkill' : 'pkill';
+      execFile(pkillPath, ['-f', 'AdsPower|SunBrowser'], { timeout: 15000 }, () => resolve());
     });
   }
   if (process.platform !== 'win32') return Promise.resolve();
@@ -1544,7 +1570,7 @@ function launchAdspower(customPath = '') {
   withDefaultBootstrapState();
 
   const exePath = customPath && fs.existsSync(String(customPath).trim()) ? String(customPath).trim() : findAdspowerExecutable();
-  if (!['win32', 'darwin'].includes(process.platform)) {
+  if (!['win32', 'darwin', 'linux'].includes(process.platform)) {
     return Promise.resolve(setBootstrapFailure(
       'A inicializacao automatica do AdsPower nao esta disponivel neste sistema.',
       {

@@ -14,6 +14,7 @@
     "build:mac": "bash scripts/build-macos.sh all",
     "build:mac:intel": "bash scripts/build-macos.sh x64",
     "build:mac:apple": "bash scripts/build-macos.sh arm64",
+    "build:linux:x64": "bash scripts/build-linux.sh x64",
     "check": "node --check scripts/local-agent.js && node --check src/adspower.js && node --check src/config.js",
     "test:startup": "node scripts/test-electron-agent-startup.js",
     "test:local-storage": "node scripts/test-local-storage-profile.js"
@@ -83,6 +84,24 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "NinjaFlixPainelUpdate-1.1.22-linux-x64.${ext}",
+      "icon": "build/logo-roxo-1024.png",
+      "executableName": "ninjaflix-painel",
+      "desktop": {
+        "Name": "Ninjaflix Painel",
+        "Comment": "Painel de ferramentas NinjaFlix"
+      }
     },
     "nsis": {
       "oneClick": false,

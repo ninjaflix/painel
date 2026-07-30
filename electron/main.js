@@ -41,7 +41,11 @@ function downloadInstaller(update) {
     if (!Number.isSafeInteger(expectedSize) || expectedSize <= 0) return reject(new Error('Tamanho da atualização inválido'));
     const updatesDir = path.join(app.getPath('userData'), 'updates');
     fs.mkdirSync(updatesDir, { recursive: true });
-    const expectedExtension = process.platform === 'darwin' ? '.zip' : '.exe';
+    const expectedExtension = process.platform === 'darwin'
+      ? '.zip'
+      : process.platform === 'linux'
+        ? '.appimage'
+        : '.exe';
     const publishedName = path.basename(String(update.fileName || update.filename || update.originalFileName || ''));
     if (publishedName && path.extname(publishedName).toLowerCase() !== expectedExtension) {
       return reject(new Error(`Formato de atualização incompatível com ${process.platform}`));
@@ -50,7 +54,9 @@ function downloadInstaller(update) {
       updatesDir,
       process.platform === 'darwin'
         ? `NinjaFlixPainelUpdate-${update.version}-${process.arch}.zip`
-        : `NinjaFlixPainelSetup-${update.version}.exe`
+        : process.platform === 'linux'
+          ? `NinjaFlixPainelUpdate-${update.version}-linux-${process.arch}.AppImage`
+          : `NinjaFlixPainelSetup-${update.version}.exe`
     );
     const partPath = `${finalPath}.part`;
     fs.rmSync(partPath, { force: true });
@@ -146,6 +152,39 @@ function installMacUpdate(updatePath) {
   child.unref();
 }
 
+function installLinuxUpdate(updatePath) {
+  const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
+  const currentAppImage = String(process.env.APPIMAGE || '').trim();
+  if (!currentAppImage || !currentAppImage.endsWith('.AppImage')) {
+    throw new Error('O painel precisa estar instalado pelo pacote Linux para receber a atualização');
+  }
+  const updateRoot = path.join(app.getPath('userData'), 'updates', `apply-${Date.now()}`);
+  const scriptPath = path.join(updateRoot, 'install-update.sh');
+  fs.mkdirSync(updateRoot, { recursive: true });
+  fs.chmodSync(updatePath, 0o755);
+  const script = [
+    '#!/bin/sh',
+    'set -eu',
+    `CURRENT_PID=${process.pid}`,
+    `SOURCE=${shellQuote(updatePath)}`,
+    `TARGET=${shellQuote(currentAppImage)}`,
+    'while kill -0 "$CURRENT_PID" 2>/dev/null; do sleep 1; done',
+    'if test -w "$(dirname "$TARGET")"; then',
+    '  /usr/bin/install -m 755 "$SOURCE" "$TARGET"',
+    'elif command -v pkexec >/dev/null 2>&1; then',
+    '  pkexec /usr/bin/install -m 755 "$SOURCE" "$TARGET"',
+    'else',
+    '  exit 13',
+    'fi',
+    'nohup "$TARGET" >/dev/null 2>&1 &',
+    '/bin/rm -f "$SOURCE" "$0"'
+  ].join('\n');
+  fs.writeFileSync(scriptPath, `${script}\n`, { mode: 0o700 });
+  const child = spawn('/bin/sh', [scriptPath], { detached: true, stdio: 'ignore' });
+  child.once('spawn', () => setTimeout(() => app.quit(), 1200));
+  child.unref();
+}
+
 async function installUpdate(update) {
   if (updateInProgress) throw new Error('Uma atualização já está em andamento');
   updateInProgress = true;
@@ -155,6 +194,10 @@ async function installUpdate(update) {
     sendUpdateStatus('installing');
     if (process.platform === 'darwin') {
       installMacUpdate(installerPath);
+      return { ok: true };
+    }
+    if (process.platform === 'linux') {
+      installLinuxUpdate(installerPath);
       return { ok: true };
     }
     await scheduleWindowsUpdate(installerPath);
@@ -279,8 +322,9 @@ function stopAgentOnPort() {
   if (process.platform === 'win32') {
     const script = `$pids=(Get-NetTCPConnection -LocalPort ${AGENT_PORT} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach($processId in $pids){ if($processId -and $processId -ne $PID){ Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue } }`;
     spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true });
-  } else if (process.platform === 'darwin') {
-    const result = spawnSync('/usr/sbin/lsof', ['-nP', `-iTCP:${AGENT_PORT}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' });
+  } else if (['darwin', 'linux'].includes(process.platform)) {
+    const lsofPath = process.platform === 'darwin' ? '/usr/sbin/lsof' : 'lsof';
+    const result = spawnSync(lsofPath, ['-nP', `-iTCP:${AGENT_PORT}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' });
     for (const pid of String(result.stdout || '').trim().split(/\s+/).filter((value) => /^\d+$/.test(value))) {
       if (Number(pid) !== process.pid) {
         try { process.kill(Number(pid), 'SIGTERM'); } catch (_) {}
