@@ -90,9 +90,11 @@ EOF
 chmod 755 "$BUNDLE/install.sh"
 
 tar -C "$BUILD_DIR" -czf "$COMPLETE_FILE" "$(basename "$BUNDLE")"
-tar -tzf "$COMPLETE_FILE" | grep -q '/install.sh$'
-tar -tzf "$COMPLETE_FILE" | grep -q '/AdsPower-Global-8.6.3-x64.deb$'
-tar -tzf "$COMPLETE_FILE" | grep -q '/NinjaFlixPainel.AppImage$'
+CONTENTS_FILE="$BUILD_DIR/complete-contents.txt"
+tar -tzf "$COMPLETE_FILE" > "$CONTENTS_FILE"
+grep -q '/install.sh$' "$CONTENTS_FILE"
+grep -q '/AdsPower-Global-8.6.3-x64.deb$' "$CONTENTS_FILE"
+grep -q '/NinjaFlixPainel.AppImage$' "$CONTENTS_FILE"
 
 (
   cd "$UPDATE_DIR"
