@@ -1,0 +1,231 @@
+name: Testar instalador macOS Apple Silicon
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/test-macos-apple-silicon-installer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-installer:
+    name: Instalação, Gatekeeper e abertura no Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 35
+
+    env:
+      INSTALLER_URL: https://ativar.ninjaflix.club/downloads/ninjaflix-installer/macos/arm64
+      EXPECTED_VERSION: 2.0.1
+      EXPECTED_SIZE: "597998879"
+      EXPECTED_SHA256: aedb7f631c8c9a7a0c3453c0a90e9924b18e0ac219d84aa3aa989724d258a830
+      TEST_DIR: /tmp/ninjaflix-installer-test
+      PKG_PATH: /tmp/ninjaflix-installer-test/NinjaFlixCompletoSetup-2.0.1-mac-arm64.pkg
+
+    steps:
+      - name: Identificar o Mac de teste
+        run: |
+          set -euo pipefail
+          mkdir -p "$TEST_DIR"
+          {
+            echo "uname=$(uname -a)"
+            echo "architecture=$(uname -m)"
+            echo "macos=$(sw_vers -productVersion)"
+            echo "build=$(sw_vers -buildVersion)"
+            echo "model=$(sysctl -n hw.model)"
+            echo "cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)"
+          } | tee "$TEST_DIR/runner.txt"
+          test "$(uname -m)" = "arm64"
+
+      - name: Baixar exatamente o instalador público
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 4 --retry-all-errors \
+            --connect-timeout 30 --output "$PKG_PATH" "$INSTALLER_URL"
+          ACTUAL_SIZE="$(stat -f %z "$PKG_PATH")"
+          ACTUAL_SHA256="$(shasum -a 256 "$PKG_PATH" | awk '{print $1}')"
+          file "$PKG_PATH" | tee "$TEST_DIR/file.txt"
+          printf '%s\n' "$ACTUAL_SIZE" > "$TEST_DIR/actual-size.txt"
+          printf '%s\n' "$ACTUAL_SHA256" > "$TEST_DIR/actual-sha256.txt"
+          test "$ACTUAL_SIZE" = "$EXPECTED_SIZE"
+          test "$ACTUAL_SHA256" = "$EXPECTED_SHA256"
+
+      - name: Analisar assinatura, notarização e Gatekeeper
+        run: |
+          set +e
+          pkgutil --check-signature "$PKG_PATH" >"$TEST_DIR/pkg-signature.txt" 2>&1
+          echo "$?" > "$TEST_DIR/pkg-signature.rc"
+
+          spctl --assess --type install --verbose=4 "$PKG_PATH" >"$TEST_DIR/spctl-before.txt" 2>&1
+          echo "$?" > "$TEST_DIR/spctl-before.rc"
+
+          xattr -w com.apple.quarantine "0081;$(date +%s);Safari;" "$PKG_PATH"
+          xattr -l "$PKG_PATH" >"$TEST_DIR/quarantine.txt" 2>&1
+
+          spctl --assess --type install --verbose=4 "$PKG_PATH" >"$TEST_DIR/spctl-quarantine.txt" 2>&1
+          echo "$?" > "$TEST_DIR/spctl-quarantine.rc"
+
+          if command -v syspolicy_check >/dev/null 2>&1; then
+            syspolicy_check distribution "$PKG_PATH" >"$TEST_DIR/syspolicy.txt" 2>&1
+            echo "$?" > "$TEST_DIR/syspolicy.rc"
+          else
+            echo "indisponível nesta versão do macOS" > "$TEST_DIR/syspolicy.txt"
+            echo "127" > "$TEST_DIR/syspolicy.rc"
+          fi
+          exit 0
+
+      - name: Inspecionar a estrutura interna do PKG
+        run: |
+          set -euo pipefail
+          rm -rf "$TEST_DIR/expanded"
+          pkgutil --expand-full "$PKG_PATH" "$TEST_DIR/expanded"
+          find "$TEST_DIR/expanded" -maxdepth 5 -print | sort > "$TEST_DIR/pkg-structure.txt"
+          grep -q "ninjaflix.pkg" "$TEST_DIR/pkg-structure.txt"
+          grep -q "adspower.pkg" "$TEST_DIR/pkg-structure.txt"
+
+      - name: Instalar como administrador
+        run: |
+          set +e
+          sudo installer -verboseR -pkg "$PKG_PATH" -target / >"$TEST_DIR/installer.txt" 2>&1
+          RC=$?
+          echo "$RC" > "$TEST_DIR/installer.rc"
+          cat "$TEST_DIR/installer.txt"
+          exit 0
+
+      - name: Validar os aplicativos instalados e suas arquiteturas
+        run: |
+          set +e
+          PANEL_APP="/Applications/Ninjaflix Painel.app"
+          ADSPOWER_APP="/Applications/AdsPower Global.app"
+          [[ -d "$ADSPOWER_APP" ]] || ADSPOWER_APP="/Applications/AdsPower.app"
+          printf '%s\n' "$PANEL_APP" > "$TEST_DIR/panel-app.txt"
+          printf '%s\n' "$ADSPOWER_APP" > "$TEST_DIR/adspower-app.txt"
+
+          if [[ -d "$PANEL_APP" ]]; then
+            PANEL_EXEC_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PANEL_APP/Contents/Info.plist")"
+            PANEL_EXEC="$PANEL_APP/Contents/MacOS/$PANEL_EXEC_NAME"
+            file "$PANEL_EXEC" > "$TEST_DIR/panel-file.txt" 2>&1
+            lipo -archs "$PANEL_EXEC" > "$TEST_DIR/panel-arch.txt" 2>&1
+            codesign --verify --deep --strict --verbose=4 "$PANEL_APP" > "$TEST_DIR/panel-codesign.txt" 2>&1
+            echo "$?" > "$TEST_DIR/panel-codesign.rc"
+            spctl --assess --type execute --verbose=4 "$PANEL_APP" > "$TEST_DIR/panel-spctl.txt" 2>&1
+            echo "$?" > "$TEST_DIR/panel-spctl.rc"
+          else
+            echo "aplicativo ausente" > "$TEST_DIR/panel-file.txt"
+            echo "ausente" > "$TEST_DIR/panel-arch.txt"
+            echo "1" > "$TEST_DIR/panel-codesign.rc"
+            echo "1" > "$TEST_DIR/panel-spctl.rc"
+          fi
+
+          if [[ -d "$ADSPOWER_APP" ]]; then
+            ADS_EXEC_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$ADSPOWER_APP/Contents/Info.plist")"
+            ADS_EXEC="$ADSPOWER_APP/Contents/MacOS/$ADS_EXEC_NAME"
+            file "$ADS_EXEC" > "$TEST_DIR/adspower-file.txt" 2>&1
+            lipo -archs "$ADS_EXEC" > "$TEST_DIR/adspower-arch.txt" 2>&1
+            codesign --verify --deep --strict --verbose=4 "$ADSPOWER_APP" > "$TEST_DIR/adspower-codesign.txt" 2>&1
+            echo "$?" > "$TEST_DIR/adspower-codesign.rc"
+            spctl --assess --type execute --verbose=4 "$ADSPOWER_APP" > "$TEST_DIR/adspower-spctl.txt" 2>&1
+            echo "$?" > "$TEST_DIR/adspower-spctl.rc"
+          else
+            echo "aplicativo ausente" > "$TEST_DIR/adspower-file.txt"
+            echo "ausente" > "$TEST_DIR/adspower-arch.txt"
+            echo "1" > "$TEST_DIR/adspower-codesign.rc"
+            echo "1" > "$TEST_DIR/adspower-spctl.rc"
+          fi
+          exit 0
+
+      - name: Tentar abrir o painel e o AdsPower
+        run: |
+          set +e
+          PANEL_APP="$(cat "$TEST_DIR/panel-app.txt")"
+          ADSPOWER_APP="$(cat "$TEST_DIR/adspower-app.txt")"
+
+          xattr -wr com.apple.quarantine "0081;$(date +%s);Safari;" "$PANEL_APP" 2>/dev/null
+          open -na "$PANEL_APP" >"$TEST_DIR/panel-open.txt" 2>&1
+          echo "$?" > "$TEST_DIR/panel-open.rc"
+          sleep 12
+          pgrep -ifl "Ninjaflix|Electron|local-agent" > "$TEST_DIR/panel-processes.txt" 2>&1
+          echo "$?" > "$TEST_DIR/panel-processes.rc"
+
+          xattr -wr com.apple.quarantine "0081;$(date +%s);Safari;" "$ADSPOWER_APP" 2>/dev/null
+          open -na "$ADSPOWER_APP" >"$TEST_DIR/adspower-open.txt" 2>&1
+          echo "$?" > "$TEST_DIR/adspower-open.rc"
+          sleep 12
+          pgrep -ifl "AdsPower" > "$TEST_DIR/adspower-processes.txt" 2>&1
+          echo "$?" > "$TEST_DIR/adspower-processes.rc"
+
+          pkill -if "Ninjaflix|local-agent|AdsPower" 2>/dev/null || true
+          exit 0
+
+      - name: Gerar relatório completo
+        if: always()
+        run: |
+          set +e
+          value() { [[ -f "$TEST_DIR/$1" ]] && cat "$TEST_DIR/$1" || printf 'não executado'; }
+          yes_no_rc() { [[ "$(value "$1")" = "0" ]] && printf 'SIM' || printf 'NÃO'; }
+
+          INSTALL_OK="$(yes_no_rc installer.rc)"
+          PANEL_PRESENT="$([[ -d '/Applications/Ninjaflix Painel.app' ]] && echo SIM || echo NÃO)"
+          ADS_PATH="$(value adspower-app.txt)"
+          ADS_PRESENT="$([[ -d "$ADS_PATH" ]] && echo SIM || echo NÃO)"
+          PANEL_ARM="$([[ "$(value panel-arch.txt)" == *arm64* ]] && echo SIM || echo NÃO)"
+          ADS_ARM="$([[ "$(value adspower-arch.txt)" == *arm64* ]] && echo SIM || echo NÃO)"
+
+          REPORT="$TEST_DIR/RELATORIO-MAC-APPLE-SILICON-2.0.1.md"
+          {
+            echo "# Relatório do instalador NinjaFlix 2.0.1 — Apple Silicon"
+            echo
+            echo "## Ambiente"
+            echo '```text'
+            value runner.txt
+            echo '```'
+            echo
+            echo "## Integridade do download público"
+            echo "- URL: \`$INSTALLER_URL\`"
+            echo "- Tamanho esperado: \`$EXPECTED_SIZE\` bytes"
+            echo "- Tamanho obtido: \`$(value actual-size.txt)\` bytes"
+            echo "- SHA-256 esperado: \`$EXPECTED_SHA256\`"
+            echo "- SHA-256 obtido: \`$(value actual-sha256.txt)\`"
+            echo
+            echo "## Resultado funcional"
+            echo "- Instalação pelo comando oficial \`installer\`: **$INSTALL_OK**"
+            echo "- Ninjaflix Painel presente em /Applications: **$PANEL_PRESENT**"
+            echo "- AdsPower presente em /Applications: **$ADS_PRESENT**"
+            echo "- Painel contém arquitetura arm64: **$PANEL_ARM**"
+            echo "- AdsPower contém arquitetura arm64: **$ADS_ARM**"
+            echo "- Processo do painel observado após abertura: **$(yes_no_rc panel-processes.rc)**"
+            echo "- Processo do AdsPower observado após abertura: **$(yes_no_rc adspower-processes.rc)**"
+            echo
+            echo "## Segurança do pacote"
+            echo "- Assinatura do PKG aceita: **$(yes_no_rc pkg-signature.rc)**"
+            echo "- Gatekeeper aceitou o PKG antes da quarentena: **$(yes_no_rc spctl-before.rc)**"
+            echo "- Gatekeeper aceitou o PKG simulando download pelo Safari: **$(yes_no_rc spctl-quarantine.rc)**"
+            echo "- syspolicy_check aprovou a distribuição: **$(yes_no_rc syspolicy.rc)**"
+            echo "- Assinatura interna do Painel válida: **$(yes_no_rc panel-codesign.rc)**"
+            echo "- Gatekeeper aceitou executar o Painel: **$(yes_no_rc panel-spctl.rc)**"
+            echo "- Assinatura interna do AdsPower válida: **$(yes_no_rc adspower-codesign.rc)**"
+            echo "- Gatekeeper aceitou executar o AdsPower: **$(yes_no_rc adspower-spctl.rc)**"
+            echo
+            for entry in \
+              pkg-signature.txt spctl-before.txt quarantine.txt spctl-quarantine.txt syspolicy.txt \
+              installer.txt panel-file.txt panel-arch.txt panel-codesign.txt panel-spctl.txt panel-open.txt panel-processes.txt \
+              adspower-file.txt adspower-arch.txt adspower-codesign.txt adspower-spctl.txt adspower-open.txt adspower-processes.txt; do
+              echo "<details><summary>$entry</summary>"
+              echo
+              echo '```text'
+              value "$entry"
+              echo '```'
+              echo "</details>"
+              echo
+            done
+            echo "## Limites deste teste"
+            echo "- O runner não permite confirmar visualmente os diálogos gráficos do Installer e do Gatekeeper."
+            echo "- A base do XProtect e as decisões online da Apple podem mudar entre versões do macOS."
+            echo "- O teste de abertura confirma criação de processo, não uma sessão completa de usuário no AdsPower."
+          } | tee "$REPORT"
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+
+          [[ "$(value installer.rc)" = "0" ]] || exit 1
+          [[ "$PANEL_PRESENT" = "SIM" && "$ADS_PRESENT" = "SIM" ]] || exit 1
+          [[ "$PANEL_ARM" = "SIM" && "$ADS_ARM" = "SIM" ]] || exit 1
