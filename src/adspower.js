@@ -78,7 +78,9 @@ async function openConfiguredProfile(profileId, options = {}) {
   const launchUrl = String(options.launchUrl || options.startUrl || options.url || '').trim();
   const params = new URLSearchParams({
     user_id: resolvedProfileId,
-    open_tabs: launchUrl ? '1' : config.adspower.openTabs,
+    // launch_args já cria a aba desejada; open_tabs=1 junto da URL podia
+    // restaurar/criar uma segunda aba vazia em alguns perfis.
+    open_tabs: launchUrl ? '0' : config.adspower.openTabs,
     ip_tab: config.adspower.ipTab,
     disable_password_filling: config.adspower.disablePasswordFilling,
     enable_password_saving: config.adspower.enablePasswordSaving,

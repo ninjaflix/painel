@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent}body{display:grid;place-items:center;padding:10px}.splash{width:510px;height:510px;overflow:hidden;border:0;border-radius:24px;background:#05060d;box-shadow:none}.splash video{display:block;width:510px;height:506px;object-fit:cover;background:#05060d}.progress{width:510px;height:4px;overflow:hidden;border-radius:0;background:rgba(255,255,255,.08)}.progress span{display:block;width:38%;height:100%;border-radius:0;background:linear-gradient(90deg,#7c3aed,#d946ef,#38bdf8,#7c3aed);background-size:240% 100%;animation:load 1.05s ease-in-out infinite}.video-complete .splash{width:510px;height:4px;border:0;border-radius:0;background:transparent}.video-complete video{display:none}.video-complete .progress{width:510px;height:4px;border-radius:0}@keyframes load{0%{transform:translateX(-110%)}100%{transform:translateX(300%)}}
+  </style>
+</head>
+<body>
+  <div class="splash"><video src="../public/video%20intro%20painel-.mp4" autoplay muted playsinline preload="auto"></video><div class="progress"><span></span></div></div>
+  <script>setTimeout(()=>document.body.classList.add('video-complete'),6000)</script>
+</body>
+</html>

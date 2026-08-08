@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Notification, nativeTheme } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
@@ -8,7 +9,16 @@ const { spawn } = require('node:child_process');
 
 const AGENT_PORT = Number(process.env.AGENT_PORT || 3101);
 const AGENT_URL = `http://127.0.0.1:${AGENT_PORT}/`;
-const APP_VERSION = process.env.AGENT_VERSION || '1.1.22';
+const APP_VERSION = app.isPackaged ? app.getVersion() : (process.env.AGENT_VERSION || app.getVersion());
+app.setName('Ninjaflix');
+const CANONICAL_USER_DATA = process.env.NINJAFLIX_USER_DATA
+  ? path.resolve(process.env.NINJAFLIX_USER_DATA)
+  : path.join(app.getPath('appData'), 'Ninjaflix');
+app.setPath('userData', CANONICAL_USER_DATA);
+nativeTheme.themeSource = 'dark';
+if (process.platform === 'win32') app.setAppUserModelId('club.ninjaflix.agent');
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
 const ADSPOWER_BASE_URL = 'http://127.0.0.1:50326';
 const ADSPOWER_DISABLE_PASSWORD_FILLING = '0';
 const ADSPOWER_ENABLE_PASSWORD_SAVING = '1';
@@ -22,11 +32,72 @@ function resolveAppIcon() {
 }
 
 let mainWindow = null;
+let splashWindow = null;
 let agentStarted = false;
 let updateInProgress = false;
+let splashFallbackTimer = null;
+let updaterConfigured = false;
+
+function migrateLegacyRuntimeState() {
+  fs.mkdirSync(CANONICAL_USER_DATA, { recursive: true });
+  const legacyRoots = [
+    path.join(app.getPath('appData'), 'ninjaflix-agent-cliente'),
+    path.join(app.getPath('appData'), 'NinjaFlix Agent')
+  ];
+  const files = [path.join('data', 'local-agent-state.json'), '.env'];
+  for (const relative of files) {
+    const target = path.join(CANONICAL_USER_DATA, relative);
+    if (fs.existsSync(target)) continue;
+    const source = legacyRoots.map((root) => path.join(root, relative)).find((candidate) => fs.existsSync(candidate));
+    if (!source) continue;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+  }
+}
 
 function sendUpdateStatus(status, details = {}) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update-status', { status, ...details });
+}
+
+function configureOfficialUpdater() {
+  if (updaterConfigured || process.platform !== 'win32' || !app.isPackaged) return;
+  updaterConfigured = true;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
+  autoUpdater.allowDowngrade = false;
+  autoUpdater.setFeedURL({
+    provider: 'generic',
+    url: `${AGENT_URL}electron-updates/`,
+    useMultipleRangeRequest: false
+  });
+  autoUpdater.on('download-progress', (progress = {}) => {
+    sendUpdateStatus('downloading', {
+      received: Number(progress.transferred || 0),
+      total: Number(progress.total || 0),
+      percent: Number(progress.percent || 0)
+    });
+  });
+  autoUpdater.on('error', (error) => {
+    if (updateInProgress) sendUpdateStatus('official-error', { message: error?.message || 'Falha no atualizador oficial' });
+  });
+}
+
+async function installWindowsOfficialUpdate(update) {
+  configureOfficialUpdater();
+  if (!updaterConfigured) throw new Error('Atualizador oficial indisponivel neste ambiente');
+  const result = await autoUpdater.checkForUpdates();
+  const available = result?.updateInfo;
+  if (!available?.version) throw new Error('O servidor nao retornou uma atualizacao oficial');
+  if (String(available.version) !== String(update.version || '')) {
+    throw new Error(`Versao oficial divergente: esperada ${update.version}, recebida ${available.version}`);
+  }
+  const downloadedFiles = await autoUpdater.downloadUpdate();
+  const installerPath = Array.isArray(downloadedFiles) ? downloadedFiles[0] : null;
+  if (!installerPath || !fs.existsSync(installerPath)) throw new Error('O atualizador oficial não retornou o instalador baixado');
+  sendUpdateStatus('installing', { official: true, version: available.version });
+  await scheduleWindowsUpdate(installerPath);
+  return { ok: true, official: true };
 }
 
 function downloadInstaller(update) {
@@ -190,6 +261,15 @@ async function installUpdate(update) {
   updateInProgress = true;
   try {
     sendUpdateStatus('starting');
+    if (process.platform === 'win32') {
+      try {
+        return await installWindowsOfficialUpdate(update);
+      } catch (officialError) {
+        sendUpdateStatus('fallback', {
+          message: `Atualizador oficial indisponivel; usando modo de compatibilidade. ${officialError.message || ''}`.trim()
+        });
+      }
+    }
     const installerPath = await downloadInstaller(update);
     sendUpdateStatus('installing');
     if (process.platform === 'darwin') {
@@ -212,33 +292,56 @@ async function installUpdate(update) {
 function scheduleWindowsUpdate(installerPath) {
   return new Promise((resolve, reject) => {
     const quotePowerShell = (value) => String(value).replaceAll("'", "''");
-    const updaterLog = path.join(app.getPath('userData'), 'updates', 'last-update.log');
+    const updatesDir = path.join(app.getPath('userData'), 'updates');
+    const updaterLog = path.join(updatesDir, 'last-update.log');
+    const updateScriptPath = path.join(updatesDir, 'install-update.ps1');
+    const updateShortcutPath = path.join(updatesDir, 'install-update.lnk');
+    const currentExecutable = process.execPath;
+    fs.mkdirSync(updatesDir, { recursive: true });
     const script = [
       `$currentProcessId = ${process.pid}`,
       `$installerPath = '${quotePowerShell(installerPath)}'`,
       `$logPath = '${quotePowerShell(updaterLog)}'`,
+      `$previousExecutable = '${quotePowerShell(currentExecutable)}'`,
+      '$canonicalExecutable = Join-Path $env:LOCALAPPDATA "Programs\\Ninjaflix Painel\\Ninjaflix Painel.exe"',
       '$deadline = (Get-Date).AddMinutes(2)',
       '"Aguardando o painel encerrar..." | Set-Content -LiteralPath $logPath -Encoding UTF8',
       'while ((Get-Process -Id $currentProcessId -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 250 }',
       'if (Get-Process -Id $currentProcessId -ErrorAction SilentlyContinue) { "O painel não encerrou no prazo." | Add-Content -LiteralPath $logPath -Encoding UTF8; exit 20 }',
+      '"Estabilizando o encerramento dos processos do painel..." | Add-Content -LiteralPath $logPath -Encoding UTF8',
+      'for ($attempt = 0; $attempt -lt 12; $attempt++) { $remainingPanels = Get-Process -Name "Ninjaflix Painel" -ErrorAction SilentlyContinue; if ($remainingPanels) { $remainingPanels | Stop-Process -Force -ErrorAction SilentlyContinue }; $netstatLines = & (Join-Path $env:SystemRoot "System32\\netstat.exe") -ano -p tcp; foreach ($line in $netstatLines) { if ($line -match "^\\s*TCP\\s+127\\.0\\.0\\.1:3101\\s+\\S+\\s+LISTENING\\s+(\\d+)\\s*$") { Stop-Process -Id ([int]$Matches[1]) -Force -ErrorAction SilentlyContinue } }; Start-Sleep -Milliseconds 250 }',
       '"Iniciando o instalador da atualização..." | Add-Content -LiteralPath $logPath -Encoding UTF8',
-      '$installer = Start-Process -FilePath $installerPath -ArgumentList @("/S", "--updated", "--force-run") -PassThru -WindowStyle Hidden',
+      '$installer = Start-Process -FilePath $installerPath -ArgumentList @("/S", "--force-run") -PassThru -WindowStyle Hidden',
       '$installer.WaitForExit()',
+      'if ($installer.ExitCode -eq 0) { $nextExecutable = if (Test-Path -LiteralPath $canonicalExecutable) { $canonicalExecutable } else { $previousExecutable }; if (-not (Test-Path -LiteralPath $nextExecutable)) { "Executavel novo nao encontrado." | Add-Content -LiteralPath $logPath -Encoding UTF8; exit 21 }; Start-Sleep -Seconds 2; if (-not (Get-Process -Name "Ninjaflix Painel" -ErrorAction SilentlyContinue)) { Start-Process -FilePath $nextExecutable -ArgumentList @("--updated") -WindowStyle Normal }; "Painel atualizado: " + $nextExecutable | Add-Content -LiteralPath $logPath -Encoding UTF8 }',
       '"Instalador finalizado com código " + $installer.ExitCode | Add-Content -LiteralPath $logPath -Encoding UTF8',
       'exit $installer.ExitCode'
-    ].join('; ');
-    const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    const helper = spawn(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
-      { detached: true, stdio: 'ignore', windowsHide: true }
+    ].join('\r\n');
+    const powerShellExecutable = path.join(
+      process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows',
+      'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
     );
-    helper.once('error', reject);
-    helper.once('spawn', () => {
-      helper.unref();
+    const launchViaWindowsShell = async () => {
+      fs.writeFileSync(updateScriptPath, `\uFEFF${script}\r\n`, 'utf8');
+      fs.writeFileSync(updaterLog, 'Preparando a atualização pelo ShellExecute...\r\n', 'utf8');
+      const shortcutCreated = shell.writeShortcutLink(updateShortcutPath, 'create', {
+        target: powerShellExecutable,
+        args: `-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "${updateScriptPath}"`,
+        cwd: updatesDir,
+        description: 'Atualizador do Ninjaflix Painel'
+      });
+      if (!shortcutCreated) throw new Error('Não foi possível criar o atalho auxiliar da atualização');
+      const openPromise = shell.openPath(updateShortcutPath);
+      sendUpdateStatus('installing', { official: true, shellExecute: true });
       resolve();
-      setTimeout(() => app.quit(), 500);
-    });
+      openPromise.then((openError) => {
+        if (openError) fs.appendFileSync(updaterLog, `Falha ao abrir o auxiliar: ${openError}\r\n`, 'utf8');
+      }).catch((error) => {
+        fs.appendFileSync(updaterLog, `Falha no ShellExecute: ${error.message}\r\n`, 'utf8');
+      });
+      setTimeout(() => app.exit(0), 1000);
+    };
+    launchViaWindowsShell().catch(reject);
   });
 }
 
@@ -285,6 +388,7 @@ function ensureRuntimeFiles() {
   if (forcedEnvContents !== envContents) fs.writeFileSync(envPath, forcedEnvContents);
 
   process.env.NINJAFLIX_AGENT_HOME = home;
+  process.env.AGENT_VERSION = APP_VERSION;
   process.env.AGENT_LOCAL_STATE_PATH = path.join(dataDir, 'local-agent-state.json');
   process.env.AGENT_HOST = process.env.AGENT_HOST || '127.0.0.1';
   process.env.AGENT_PORT = String(AGENT_PORT);
@@ -345,12 +449,49 @@ async function startAgent() {
   require('../scripts/local-agent.js');
 }
 
+function revealMainWindow() {
+  clearTimeout(splashFallbackTimer);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setSkipTaskbar(false);
+    mainWindow.setPosition(0, 0, false);
+    mainWindow.show();
+    mainWindow.maximize();
+    mainWindow.focus();
+  }
+  if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
+  splashWindow = null;
+}
+
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 530,
+    height: 530,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  });
+  splashWindow.setIgnoreMouseEvents(true);
+  splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+  splashFallbackTimer = setTimeout(revealMainWindow, 30000);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
     height: 1000,
     minWidth: 820,
     minHeight: 640,
+    show: true,
+    x: -20000,
+    y: -20000,
+    skipTaskbar: true,
     useContentSize: true,
     title: `Ninjaflix Painel ${APP_VERSION}`,
     backgroundColor: '#03040b',
@@ -360,12 +501,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      webviewTag: true
+      webviewTag: true,
+      backgroundThrottling: true
     }
   });
 
   mainWindow.loadFile(path.join(__dirname, 'shell.html'));
-  mainWindow.maximize();
   mainWindow.on('restore', () => {
     if (!mainWindow?.isDestroyed()) mainWindow.webContents.send('window-reactivated');
   });
@@ -373,7 +514,15 @@ function createWindow() {
 
 ipcMain.handle('agent-url', () => AGENT_URL);
 ipcMain.handle('app-version', () => APP_VERSION);
+ipcMain.on('panel-content-ready', () => revealMainWindow());
 ipcMain.handle('install-update', (_event, update) => installUpdate(update));
+ipcMain.handle('show-notification', (_event, payload = {}) => {
+  if (!Notification.isSupported()) return false;
+  const notification = new Notification({ title: 'Ninjaflix', body: String(payload.body || payload.message || payload.title || '') });
+  notification.on('click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
+  notification.show();
+  return true;
+});
 
 ipcMain.handle('open-external-browser', async (_event, url) => {
   if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
@@ -412,14 +561,28 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
-app.whenReady().then(async () => {
-  await startAgent();
-  requestAdsPowerStartup();
-  createWindow();
-});
+if (hasSingleInstanceLock) {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+
+  app.whenReady().then(async () => {
+    migrateLegacyRuntimeState();
+    configureOfficialUpdater();
+    createSplashWindow();
+    await startAgent();
+    createWindow();
+  });
+}
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createSplashWindow();
+    createWindow();
+  }
 });
 
 app.on('window-all-closed', () => {

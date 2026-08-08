@@ -27,7 +27,7 @@ jobs:
       - name: Confirmar arquitetura
         run: |
           test "$(uname -m)" = "arm64"
-          node -p "require('./package.json').version" | grep -qx "1.1.22"
+          node -p "require('./package.json').version" | grep -qx "2.0.1"
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -49,7 +49,7 @@ jobs:
       - name: Disponibilizar arquivos para download
         uses: actions/upload-artifact@v4
         with:
-          name: NinjaFlix-macOS-Apple-Silicon-1.1.22-${{ github.run_number }}
+          name: NinjaFlix-macOS-Apple-Silicon-2.0.1-${{ github.run_number }}
           path: |
             ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-arm64.zip
             ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-arm64.pkg

@@ -1,6 +1,6 @@
 {
   "name": "ninjaflix-agent-cliente",
-  "version": "1.1.22",
+  "version": "2.0.1",
   "description": "Agente local NinjaFlix para vincular mÃ¡quina por CPF, consultar perfis liberados e abrir perfis ADSPower.",
   "main": "scripts/local-agent.js",
   "bin": "scripts/local-agent.js",
@@ -17,6 +17,8 @@
     "build:linux:x64": "bash scripts/build-linux.sh x64",
     "check": "node --check scripts/local-agent.js && node --check src/adspower.js && node --check src/config.js",
     "test:startup": "node scripts/test-electron-agent-startup.js",
+    "test:cache": "node scripts/test-dashboard-cache.js",
+    "test:session-recovery": "node scripts/test-startup-session-recovery.js",
     "test:local-storage": "node scripts/test-local-storage-profile.js"
   },
   "devDependencies": {
@@ -24,6 +26,7 @@
     "electron-builder": "^24.13.3"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "ws": "^8.18.3"
   },
   "build": {
@@ -64,7 +67,13 @@
           ]
         }
       ],
-      "artifactName": "NinjaFlixPainelSetup-1.1.22.${ext}",
+      "artifactName": "NinjaFlixPainelSetup-2.0.1.${ext}",
+      "publish": [
+        {
+          "provider": "generic",
+          "url": "http://127.0.0.1:3101/electron-updates/"
+        }
+      ],
       "icon": "build/icon.ico"
     },
     "mac": {
@@ -95,7 +104,7 @@
           ]
         }
       ],
-      "artifactName": "NinjaFlixPainelUpdate-1.1.22-linux-x64.${ext}",
+      "artifactName": "NinjaFlixPainelUpdate-2.0.1-linux-x64.${ext}",
       "icon": "build/logo-roxo-1024.png",
       "executableName": "ninjaflix-painel",
       "desktop": {
@@ -106,7 +115,7 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Ninjaflix Painel",

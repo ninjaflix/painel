@@ -20,7 +20,7 @@ const {
 
 const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const PORT = Number(process.env.AGENT_PORT || 3101);
-const APP_VERSION = process.env.AGENT_VERSION || '1.1.22';
+const APP_VERSION = process.env.AGENT_VERSION || process.env.npm_package_version || '2.0.1';
 const ADSPOWER_API_PORT = '50326';
 function normalizePortalUrl(value) {
   const raw = String(value || `http://127.0.0.1:${config.port}`).replace(/\/$/, '');
@@ -85,13 +85,27 @@ const state = {
   seenKernelVersions: persistedLocalState.seenKernelVersions || {},
   eventClients: new Set(),
   extensionSessions: new Map(),
-  adspowerApiKey: ''
+  adspowerApiKey: '',
+  cachedProfiles: persistedLocalState.cachedProfiles && typeof persistedLocalState.cachedProfiles === 'object'
+    ? persistedLocalState.cachedProfiles
+    : null
 };
 
 const ADSPOWER_PROFILES_CACHE_TTL_MS = Number(process.env.ADSPOWER_PROFILES_CACHE_TTL_MS || 30000);
+const DASHBOARD_PROFILES_CACHE_TTL_MS = Number(process.env.DASHBOARD_PROFILES_CACHE_TTL_MS || 60000);
+const DASHBOARD_PROFILES_MAX_STALE_MS = Number(process.env.DASHBOARD_PROFILES_MAX_STALE_MS || 24 * 60 * 60 * 1000);
+const PORTAL_REQUEST_TIMEOUT_MS = Number(process.env.PORTAL_REQUEST_TIMEOUT_MS || 8000);
+const HEARTBEAT_CACHE_TTL_MS = Number(process.env.HEARTBEAT_CACHE_TTL_MS || 30000);
 const ADSPOWER_BOOTSTRAP_TIMEOUT_MS = Number(process.env.ADSPOWER_BOOTSTRAP_TIMEOUT_MS || 35000);
 let adspowerProfilesCache = { expiresAt: 0, payload: null };
 let adspowerProfilesInFlight = null;
+let dashboardProfilesRefreshInFlight = null;
+let heartbeatCache = { checkedAt: 0, payload: null };
+let heartbeatInFlight = null;
+let machineAuthInFlight = null;
+let catalogEventStreamController = null;
+let catalogEventStreamRunning = false;
+let catalogRefreshTimer = null;
 let adspowerLaunchInFlight = null;
 let profileStatusMonitorTimer = null;
 const DEFAULT_EXPECTED_ADSPOWER_KERNEL = 150;
@@ -314,9 +328,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
   .profile-options-wrap .options-close-float::before{content:none!important}
   .profile-options-wrap .options-close-float:hover{background:rgba(251,113,133,.10)!important}
   .profile-options-wrap .profile-options{width:100%!important;margin:0!important;padding-top:8px!important}
-  body.agent-booting .shell{display:grid!important;place-items:center!important;align-content:center!important;gap:14px!important;min-height:calc(100vh - 130px)!important}
-  body.agent-booting .shell::before{content:''!important;width:38px!important;height:38px!important;min-height:0!important;border:4px solid rgba(192,132,252,.20)!important;border-top-color:#c084fc!important;border-radius:999px!important;animation:agentBootSpin .8s linear infinite!important}
-  body.agent-booting .shell::after{content:'Carregando painel...'!important;color:#c084fc!important;font-size:13px!important;font-weight:800!important;letter-spacing:.08em!important;text-transform:uppercase!important}
+  .agent-intro{position:fixed;inset:0;z-index:5000;display:grid;place-items:center;padding:24px;background:rgba(3,4,11,.74);backdrop-filter:blur(16px);opacity:0;pointer-events:none;transition:opacity .45s ease}.agent-booting .agent-intro{opacity:1;pointer-events:auto}.agent-intro-card{width:min(680px,calc(100vw - 32px));overflow:hidden;border:1px solid rgba(168,85,247,.28);border-radius:24px;background:#05060d;box-shadow:0 34px 120px rgba(0,0,0,.72)}.agent-intro video{display:block;width:100%;max-height:70vh;object-fit:contain;background:#05060d}.agent-intro-progress{height:4px;overflow:hidden;background:rgba(255,255,255,.08)}.agent-intro-progress span{display:block;width:38%;height:100%;border-radius:99px;background:linear-gradient(90deg,#7c3aed,#d946ef,#38bdf8,#7c3aed);background-size:240% 100%;animation:introProgress 1.25s ease-in-out infinite}.session-loader{position:fixed;inset:0;z-index:4990;display:none;place-items:center;background:#03040b}.agent-checking-session:not(.agent-booting) .session-loader{display:grid}.session-loader-bar{width:min(280px,55vw);height:3px;overflow:hidden;border-radius:99px;background:rgba(255,255,255,.08)}.session-loader-bar span{display:block;width:38%;height:100%;border-radius:99px;background:linear-gradient(90deg,#7c3aed,#d946ef,#38bdf8);animation:introProgress .9s ease-in-out infinite}@keyframes introProgress{0%{transform:translateX(-110%);background-position:0 0}100%{transform:translateX(300%);background-position:100% 0}}
   @keyframes agentBootSpin{to{transform:rotate(360deg)}}
   html,body{max-width:100%;overflow-x:hidden}
   .desktop-update-wrap{position:relative;order:2}
@@ -379,21 +391,33 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
   }
   </style>
 </head>
-<body class="agent-booting">
+<body class="agent-booting agent-checking-session">
   <script>
     window.__agentBootStartedAt=Date.now();
+    window.__showAgentIntro=!sessionStorage.getItem('ninjaflix:intro-seen');
+    if(window.__showAgentIntro)sessionStorage.setItem('ninjaflix:intro-seen','1');
+    else document.body.classList.remove('agent-booting');
+    window.__agentIntroTimer=setTimeout(()=>document.body.classList.remove('agent-booting'),window.__showAgentIntro?6000:0);
     window.finishAgentBoot=function(){
-      const wait=Math.max(0,2000-(Date.now()-window.__agentBootStartedAt));
+      const wait=window.__showAgentIntro?Math.max(0,6000-(Date.now()-window.__agentBootStartedAt)):0;
       clearTimeout(window.__agentBootFinishTimer);
-      window.__agentBootFinishTimer=setTimeout(()=>document.body.classList.remove('agent-booting'),wait);
+      window.__agentBootFinishTimer=setTimeout(()=>document.body.classList.remove('agent-booting','agent-checking-session'),wait);
     };
-    window.__agentBootSafetyTimer=setTimeout(()=>window.finishAgentBoot(),6000);
+    window.markAgentContentReady=function(reason){window.__agentContentReady=true;window.ninjaflixDesktop?.contentReady?.({reason:String(reason||'ready')});window.finishAgentBoot()};
+    window.__agentBootSafetyTimer=setTimeout(()=>window.finishAgentBoot(),30000);
     window.addEventListener('error',()=>window.finishAgentBoot());
     window.addEventListener('unhandledrejection',()=>window.finishAgentBoot());
   </script>
-  <div id="kernelInstallOverlay" class="kernel-install-overlay hidden" role="dialog" aria-modal="true" aria-live="polite"><section class="kernel-install-card"><h2 id="kernelInstallTitle">Preparando seu navegador</h2><p id="kernelInstallMessage">Aguarde enquanto preparamos tudo para abrir seu perfil.</p><div class="kernel-install-track"><span id="kernelInstallProgress" class="kernel-install-progress"></span></div><span id="kernelInstallPercent" class="kernel-install-percent">0%</span></section></div>
+  <div class="agent-intro" aria-label="Carregando painel"><div class="agent-intro-card"><video src="/intro-video.mp4" autoplay muted playsinline preload="auto"></video><div class="agent-intro-progress"><span></span></div></div></div>
+  <div class="session-loader" aria-label="Verificando sessão"><div class="session-loader-bar"><span></span></div></div>
+  <div id="kernelInstallOverlay" class="kernel-install-overlay hidden" role="dialog" aria-modal="true" aria-live="polite"><section class="kernel-install-card"><h2 id="kernelInstallTitle">Preparando seu navegador</h2><p id="kernelInstallMessage">Aguarde enquanto preparamos tudo para abrir seu perfil.</p><div id="sunbrowserSlides" class="sunbrowser-slides hidden"></div><div class="kernel-install-track"><span id="kernelInstallProgress" class="kernel-install-progress"></span></div><span id="kernelInstallPercent" class="kernel-install-percent">0%</span></section></div>
   <header class="agent-top"><div class="agent-frame"><div class="top-line"><div class="brand"><div class="logo"><img src="/logo-roxo.svg" alt="Ninjaflix" /></div><div><div class="brand-title">Ninjaflix</div><div class="brand-sub muted">Dashboard de ferramentas</div></div></div><div class="top-info"><div class="info-row"><div class="chip"><span>Pacote:</span> <strong id="clientPackage">-</strong></div><div class="chip"><span>Validade:</span> <strong id="subscriptionInfo">-</strong></div><div id="headerKernelStatus" class="header-kernel-status hidden"></div></div></div><div class="top-actions"><div class="notice-wrap"><button id="noticeButton" class="top-icon" title="Avisos">Avisos</button><div id="noticeDropdown" class="notice-dropdown hidden"><div class="notice-dropdown-title">Avisos recentes</div><div id="noticeDropdownList" class="notice-list"><div class="notice-item"><strong>Carregando...</strong></div></div></div></div><div id="desktopUpdateWrap" class="desktop-update-wrap"><button id="desktopUpdateButton" class="top-icon desktop-update-button" title="Atualizações" aria-label="Atualizações">Atualizações</button><div id="desktopUpdateDropdown" class="desktop-update-dropdown hidden"><h3>Atualizações</h3><p id="desktopUpdateTitle">Verificando atualizações...</p><span id="desktopUpdateVersion" class="desktop-update-version"></span><p id="desktopUpdateMessage"></p><p id="desktopUpdateStatus" class="desktop-update-status"></p><div class="desktop-update-actions"><button id="desktopUpdateLater" type="button">Fechar</button><button id="desktopUpdateInstall" class="desktop-update-install hidden" type="button">Atualizar agora</button></div></div></div><div class="profile-wrap"><button id="profileButton" class="profile-button" title="Perfil do cliente">Perfil</button><div id="profileDropdown" class="profile-dropdown hidden"><div class="profile-head"><div class="profile-avatar">P</div><div><strong id="profileName">Cliente</strong><small id="profileEmail">-</small></div></div><div class="profile-row"><span>Pacote</span><strong id="profilePackage">-</strong></div><div class="profile-row"><span>Validade</span><strong id="profileValidity">-</strong></div><button id="profileLogoutButton" class="danger profile-logout">Sair do agente</button></div></div></div></div><nav class="main-menu"><button class="active" data-panel="tools">Ferramentas</button><button data-launch="financeiro">Financeiro</button><button data-launch="suporte">Suporte</button><button data-launch="tutoriais">Tutoriais</button></nav></div></header>
   <main class="shell"><section id="activationCard" class="login-card"><form id="activationForm" class="login-form"><input name="email" type="email" autocomplete="email" placeholder="E-mail usado no checkout" required /><button>Entrar e vincular maquina</button></form></section><section id="agentCard" class="tools-shell hidden"><div class="tools-sidebar-wrap"><aside class="tools-sidebar"><div class="sidebar-title">Categorias</div><div id="categoryList"></div></aside><div id="kernelStatus" class="kernel-status hidden" role="status" aria-live="polite"></div></div><section class="tools-content"><div class="tools-toolbar"><div><h1 id="toolsTitle">Plano ativo</h1><p id="toolsSubtitle" class="muted">Ferramentas prontas - organizadas por categoria</p></div><div class="tools-actions"><input id="toolSearch" class="tool-search" placeholder="Buscar ferramenta..." /><button id="refreshProfiles" class="secondary">Atualizar</button></div></div><div id="profilesList"></div><pre id="resultBox" class="hidden"></pre></section></section><section id="debugCard" class="card hidden"><h2>Debug da maquina</h2><button id="debugButton" class="secondary">Comparar com portal</button><pre id="debugBox"></pre></section></main>
+  <button id="supportChatButton" class="support-chat-button hidden" type="button" aria-label="Abrir chat do suporte"><span class="support-chat-icon">?</span><span>Suporte</span><b id="supportChatUnread" class="hidden">0</b></button>
+  <aside id="supportChatPanel" class="support-chat-panel hidden" aria-label="Chat do suporte">
+    <header><div><strong>Suporte NinjaFlix</strong><small>Atendimento pelo painel</small></div><button id="supportChatClose" type="button" aria-label="Fechar chat">&times;</button></header>
+    <div id="supportChatBody" class="support-chat-body"><div class="support-chat-loading">Carregando atendimento...</div></div>
+  </aside>
   <div id="noticeModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="noticeModalTitle"><section class="agent-modal"><div class="modal-head"><div><h2 id="noticeModalTitle">Avisos e novidades</h2><p class="muted">Ultimas noticias e informacoes enviadas pelo painel admin agente.</p></div><button class="modal-close" data-close-modal="noticeModal">x</button></div><div id="noticeList" class="notice-list"><div class="notice-item"><strong>Carregando avisos...</strong><p>Aguarde enquanto buscamos as ultimas informacoes.</p></div></div></section></div>
   <div id="agentPopupModal" class="modal-backdrop agent-popup hidden" role="dialog" aria-modal="true" aria-labelledby="agentPopupTitle"><section class="agent-modal"><div class="modal-head"><div><h2 id="agentPopupTitle">Aviso</h2></div><button class="modal-close" data-close-modal="agentPopupModal">x</button></div><div id="agentPopupBody" class="notice-list"></div><a id="agentPopupCta" class="popup-cta hidden" href="#" target="_blank" rel="noopener">Abrir link</a></section></div>
   <div id="supportModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="supportModalTitle"><section class="agent-modal"><div class="modal-head"><div><h2 id="supportModalTitle">Suporte NinjaFlix</h2></div><button class="modal-close" data-close-modal="supportModal" aria-label="Fechar">x</button></div><div class="support-hours-only"><div class="support-hour-row"><strong>Segunda a sexta</strong><span>09h às 12h | 14h às 19h</span></div><div class="support-hour-row"><strong>Sábado</strong><span>10h às 12h | 13h30 às 15h</span></div><div class="support-hour-row"><strong>Domingos e feriados</strong><span>Fechado</span></div></div><a class="whatsapp-button" href="https://wa.me/5551981819173" target="_blank" rel="noopener">Chamar no WhatsApp</a></section></div>
@@ -457,6 +481,17 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
         :String(profile?.availablePlans||'').trim();
       return 'Dispon\u00edvel no plano: '+(plans||profile?.packageName||'outro plano');
     }
+    const profilePreferenceKey='ninjaflix:profile-preferences:v1';
+    function profilePreferences(){try{return JSON.parse(localStorage.getItem(profilePreferenceKey)||'{"favorites":[],"usage":{}}')}catch{return {favorites:[],usage:{}}}}
+    function saveProfilePreferences(value){localStorage.setItem(profilePreferenceKey,JSON.stringify(value))}
+    function isFavoriteProfile(key){return profilePreferences().favorites.includes(String(key))}
+    function profileUsageScore(key){
+      const prefs=profilePreferences(),usage=prefs.usage||{},entries=Object.values(usage),total=entries.reduce((sum,item)=>sum+Number(item?.count||0),0);
+      if(total<8)return 0;
+      const mean=total/Math.max(1,entries.length),item=usage[String(key)]||{};
+      return (Number(item.count||0)+(mean*5))/6;
+    }
+    function rememberProfileUse(key){const prefs=profilePreferences();prefs.usage=prefs.usage||{};const item=prefs.usage[String(key)]||{count:0};item.count=Number(item.count||0)+1;item.lastUsedAt=Date.now();prefs.usage[String(key)]=item;saveProfilePreferences(prefs)}
     function renderProfiles(){
       const query=String(toolSearch?.value||'').trim().toLocaleLowerCase('pt-BR');
       const uniqueProfiles=uniqueProfilesWithCategories();
@@ -470,6 +505,8 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
         .map((profile,index)=>({profile,index}))
         .sort((a,b)=>
           Number(!profileIsAvailable(a.profile))-Number(!profileIsAvailable(b.profile))||
+          Number(!isFavoriteProfile(profileKey(a.profile)))-Number(!isFavoriteProfile(profileKey(b.profile)))||
+          profileUsageScore(profileKey(b.profile))-profileUsageScore(profileKey(a.profile))||
           String(a.profile.name||'').localeCompare(String(b.profile.name||''),'pt-BR',{sensitivity:'base'})||
           a.index-b.index
         )
@@ -484,7 +521,10 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
           :'unavailable';
         const busy=['busy','opening','closing'].includes(state);
         const open=state==='open';
+        const maintenanceMinutes=profile.maintenanceUntil?Math.max(0,Math.ceil((new Date(profile.maintenanceUntil).getTime()-Date.now())/60000)):0;
+        const maintenanceTime=maintenanceMinutes?(Math.floor(maintenanceMinutes/60)?Math.floor(maintenanceMinutes/60)+'h'+(maintenanceMinutes%60?' '+(maintenanceMinutes%60)+'min':''):maintenanceMinutes+'min'):'';
         const description=profile.description||profile.subtitle||'Descri\u00e7\u00e3o n\u00e3o informada';
+        const descriptionHtml=profile.maintenance?('Em breve no ar!'+(maintenanceTime?' <strong>'+esc(maintenanceTime+' restantes')+'</strong>':'')):esc(available?description:unavailableProfileText(profile));
         const accent=available?(profile.accentColor||'#8b5cf6'):'#64748b';
         const gradient=available
           ?(profile.iconGradient||('linear-gradient(135deg,'+accent+','+(profile.accentColor2||'#4f46e5')+')'))
@@ -515,9 +555,10 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
           ?buttonsHtml+optionsHtml
           :'<button type="button" class="action-pill upgrade-pill" data-upgrade="1">Upgrade</button>';
         return '<div class="profile-card '+(menuOpen?'options-open ':'')+(available?'':'unavailable')+'" data-card-key="'+esc(cardKey)+'" data-profile-id="'+esc(profile.profileId||'')+'" data-tag-label="'+esc(profile.tagLabel||profile.tag||profile.badge||'novo')+'" data-unavailable-message="'+esc(unavailableMessage)+'" title="" style="--tool-accent:'+accent+';--tool-gradient:'+gradient+'">'+
-          '<span class="tool-badge '+(available?tagClass(state):'unavailable')+'">'+(available?tagText(profile,state):'INDISPON\u00cdVEL')+'</span>'+
+          '<div class="tool-card-top"><button type="button" class="favorite-toggle '+(isFavoriteProfile(cardKey)?'is-favorite':'')+'" data-favorite-profile="'+esc(cardKey)+'" aria-label="'+(isFavoriteProfile(cardKey)?'Remover dos favoritos':'Adicionar aos favoritos')+'" title="Favoritar">&#9733;</button>'+
+          '<span class="tool-badge '+(available?tagClass(state):'unavailable')+'">'+(available?tagText(profile,state):'INDISPON\u00cdVEL')+'</span></div>'+
           (menuOpen?'':'<div class="tool-icon">'+profileIcon(profile.name)+'</div>')+
-          '<div class="tool-meta"><div class="tool-title">'+esc(profile.name)+'</div><small class="muted">'+esc(available?description:unavailableMessage)+'</small>'+
+          '<div class="tool-meta"><div class="tool-title">'+esc(profile.name)+'</div><small class="muted">'+descriptionHtml+'</small>'+
           (available?'<div class="profile-state '+state+'"><span class="dot"></span>'+profileStateLabel(state)+'</div>':'')+
           '</div><div class="profile-actions">'+actionsHtml+'</div></div>';
       }
@@ -529,8 +570,9 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
         return;
       }
       if(activeCategory==='Todas'||query){
-        const featured=list.filter(profile=>profile.featured);
-        const regular=list.filter(profile=>!profile.featured);
+        const favorites=list.filter(profile=>isFavoriteProfile(profileKey(profile)));
+        const featured=list.filter(profile=>profile.featured&&!isFavoriteProfile(profileKey(profile)));
+        const regular=list.filter(profile=>!profile.featured&&!isFavoriteProfile(profileKey(profile)));
         const categoryOrder=(currentCategories||[]).map(category=>String(category?.name||'').trim()).filter(Boolean);
         const categories=Array.from(new Set([...categoryOrder,...regular.flatMap(profileCategories)]));
         const rendered=new Set();
@@ -539,7 +581,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
           items.forEach(profile=>rendered.add(profileKey(profile)));
           return sectionHtml(category,items);
         }).join('');
-        profilesList.innerHTML=sectionHtml('Destaque',featured)+sections;
+        profilesList.innerHTML=sectionHtml('Favoritos',favorites)+sectionHtml('Destaque',featured)+sections;
         return;
       }
       profilesList.innerHTML='<div class="featured-label">'+esc(activeCategory)+'</div><div class="tools-grid">'+list.map(cardHtml).join('')+'</div>';
@@ -595,13 +637,33 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
       setKernelStatus('error','Máquina bloqueada',safeMessage,'');
     };
 
-    fetch('/health',{cache:'no-store'})
-      .then(response=>response.json())
-      .then(health=>{
-        if(health?.accessIssue)renderAgentAccessIssue(health.accessIssue,health.user);
-      })
-      .catch(()=>null)
-      .finally(()=>window.finishAgentBoot());
+    const requestWithHealthSnapshot=req;
+    req=async function(requestPath,options={}){
+      const response=await requestWithHealthSnapshot(requestPath,options);
+      if(requestPath==='/health'){
+        window.__lastAgentHealth=response;
+        window.__lastAgentHealthAt=Date.now();
+      }
+      return response;
+    };
+    function handleInitialHealth(health){
+        if(health?.accessIssue){renderAgentAccessIssue(health.accessIssue,health.user);window.markAgentContentReady('access-issue')}
+        else if(!health?.user)window.markAgentContentReady('login');
+        else{
+          let attempts=0;
+          const waitForInitialProfiles=()=>{
+            if(profilesList?.children?.length){window.markAgentContentReady('initial-profiles');return}
+            attempts+=1;
+            if(attempts<150)setTimeout(waitForInitialProfiles,100);
+            else window.markAgentContentReady('initial-profiles-timeout');
+          };
+          waitForInitialProfiles();
+        }
+    }
+    setTimeout(()=>{
+      if(window.__lastAgentHealth){handleInitialHealth(window.__lastAgentHealth);return}
+      req('/health').then(handleInitialHealth).catch(()=>window.markAgentContentReady('health-error'));
+    },900);
 
     function renderAgentAccessIssue(issue,user){
       const message=fixStatusEncoding(String(issue?.message||'Não foi possível liberar este dispositivo.'));
@@ -634,7 +696,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
     }
     const loadProfilesWithAccessGuard=loadProfiles;
     loadProfiles=async function(){
-      const health=await fetch('/health',{cache:'no-store'}).then(response=>response.json()).catch(()=>null);
+      const health=Date.now()-Number(window.__lastAgentHealthAt||0)<30000?window.__lastAgentHealth:null;
       if(health?.accessIssue){
         renderAgentAccessIssue(health.accessIssue,health.user);
         return;
@@ -645,14 +707,73 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
     req=async function(requestPath,options={}){
       if(requestPath!=='/customer-login')return requestBeforeLoginDelay(requestPath,options);
       const started=Date.now();
-      document.body.classList.add('agent-booting');
-      window.__agentBootStartedAt=started;
       try{return await requestBeforeLoginDelay(requestPath,options)}
       finally{
         const wait=Math.max(500,2000-(Date.now()-started));
-        setTimeout(()=>document.body.classList.remove('agent-booting'),wait);
+        await new Promise(resolve=>setTimeout(resolve,wait));
       }
     };
+    (function setupBlockingLoginGate(){
+      if(!activationCard)return;
+      activationCard.classList.add('login-gate');
+      activationCard.innerHTML='<div class="login-gate-card"><div class="login-gate-brand"><img src="/logo-roxo.svg" alt="NinjaFlix" /><span>NinjaFlix</span></div><h1>Entre no seu painel</h1><p class="login-gate-copy">Use exatamente o mesmo e-mail cadastrado no momento da compra.</p><form id="activationForm" class="login-form"><label for="activationEmail">E-mail da compra</label><input id="activationEmail" name="email" type="email" autocomplete="email" placeholder="seuemail@exemplo.com" required /><button type="submit"><span class="login-button-label">Entrar e vincular dispositivo</span></button></form><div class="login-validation hidden" role="status" aria-live="polite"><div class="login-validation-head"><span class="login-validation-spinner"></span><strong class="login-validation-title">Validando acesso...</strong></div><p class="login-validation-message">Confirmando sua conta e este dispositivo.</p><div class="login-validation-track"><span class="login-validation-progress"></span></div></div><p class="login-gate-error hidden" role="alert"></p><small>O painel somente será liberado depois que a conta e o dispositivo estiverem confirmados.</small></div>';
+      const style=document.createElement('style');
+      style.textContent='#activationCard.login-gate{position:fixed!important;inset:0!important;z-index:2400!important;width:100%!important;height:100vh!important;margin:0!important;padding:24px!important;display:grid!important;place-items:center!important;background:rgba(3,4,11,.82)!important;backdrop-filter:blur(14px)!important}#activationCard.login-gate.hidden:not(.login-validating){display:none!important}#activationCard.login-gate.login-validating{display:grid!important}.login-gate-card{width:min(520px,calc(100vw - 32px));border:1px solid rgba(168,85,247,.55);border-radius:26px;background:linear-gradient(145deg,rgba(24,23,45,.98),rgba(12,13,28,.98));box-shadow:0 30px 100px rgba(0,0,0,.62),0 0 45px rgba(168,85,247,.14);padding:34px}.login-gate-brand{display:flex;align-items:center;gap:10px;margin-bottom:24px;color:#e9d5ff;font-size:16px;font-weight:900}.login-gate-brand img{width:34px;height:34px}.login-gate-card h1{margin:0;color:#f5f3ff;font-size:30px;letter-spacing:-.04em}.login-gate-copy{margin:10px 0 25px;color:#b7b6c9;font-size:15px;line-height:1.5}.login-gate .login-form{display:grid!important;gap:10px!important}.login-gate .login-form label{color:#ddd6fe;font-size:12px;font-weight:800}.login-gate .login-form input{height:52px!important;border:1px solid rgba(168,85,247,.46)!important;border-radius:15px!important;background:#0b0d19!important;padding:0 16px!important;font-size:15px!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.02)}.login-gate .login-form input:focus{border-color:#c084fc!important;box-shadow:0 0 0 3px rgba(168,85,247,.18)!important}.login-gate .login-form button{height:52px!important;margin-top:5px!important;border:0!important;border-radius:15px!important;background:linear-gradient(135deg,#b55cff,#7c3aed)!important;color:#fff!important;font-size:14px!important;box-shadow:0 14px 34px rgba(124,58,237,.3)!important}.login-gate .login-form button:disabled{opacity:.7!important}.login-validation{margin-top:18px;padding:15px;border:1px solid rgba(168,85,247,.3);border-radius:16px;background:rgba(168,85,247,.07)}.login-validation-head{display:flex;align-items:center;gap:10px}.login-validation-spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.2);border-top-color:#c084fc;border-radius:999px;animation:spin .75s linear infinite}.login-validation-message{margin:7px 0 12px;color:#aaa8bf;font-size:12px}.login-validation-track{height:4px;overflow:hidden;background:rgba(255,255,255,.1)}.login-validation-progress{display:block;width:12%;height:100%;background:linear-gradient(90deg,#8b5cf6,#c084fc,#f0abfc);transition:width .4s ease}.login-gate-error{margin:16px 0 0;padding:12px 14px;border:1px solid rgba(251,113,133,.45);border-radius:14px;background:rgba(251,113,133,.09);color:#fecdd3;line-height:1.4}.login-gate-card>small{display:block;margin-top:18px;color:#77768b;line-height:1.4}@media(max-width:600px){.login-gate-card{padding:25px}.login-gate-card h1{font-size:25px}}';
+      style.textContent+='body.login-mode .agent-top{display:none!important}body.login-mode .shell{min-height:100vh!important;padding:0!important}body.login-mode #activationCard.login-gate{background:#03040b!important;backdrop-filter:none!important}';
+      document.head.append(style);
+      const form=activationCard.querySelector('#activationForm');
+      const input=form.querySelector('input[name="email"]');
+      const button=form.querySelector('button[type="submit"]');
+      const label=button.querySelector('.login-button-label');
+      const validation=activationCard.querySelector('.login-validation');
+      const validationTitle=activationCard.querySelector('.login-validation-title');
+      const validationMessage=activationCard.querySelector('.login-validation-message');
+      const progress=activationCard.querySelector('.login-validation-progress');
+      const errorBox=activationCard.querySelector('.login-gate-error');
+      function loginProgress(percent,title,message){progress.style.width=Math.max(8,Math.min(100,percent))+'%';validationTitle.textContent=title;validationMessage.textContent=message}
+      async function waitForAuthorizedHealth(){
+        let lastHealth=null;
+        for(let attempt=0;attempt<30;attempt+=1){
+          lastHealth=await fetch('/health',{cache:'no-store'}).then(response=>response.json());
+          const issueCode=String(lastHealth?.accessIssue?.code||'').toLowerCase();
+          const subscriptionIssue=['subscription_expired','subscription_inactive','subscription_not_found','customer_inactive'].includes(issueCode);
+          if(lastHealth?.authenticated&&lastHealth?.user&&(lastHealth?.machineAuthorized||subscriptionIssue))return lastHealth;
+          if(lastHealth?.accessIssue&&!subscriptionIssue)throw new Error(fixStatusEncoding(lastHealth.accessIssue.message||'Este dispositivo não foi autorizado.'));
+          loginProgress(45+Math.min(35,attempt*2),'Confirmando dispositivo...','Aguardando a confirmação segura desta máquina.');
+          await new Promise(resolve=>setTimeout(resolve,250));
+        }
+        throw new Error(fixStatusEncoding(lastHealth?.error||'Não foi possível confirmar o dispositivo. Tente novamente.'));
+      }
+      form.addEventListener('submit',async event=>{
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const email=String(input.value||'').trim().toLowerCase();
+        if(!email||!input.checkValidity()){input.reportValidity();return}
+        activationCard.classList.add('login-validating');
+        activationCard.classList.remove('hidden');
+        document.body.classList.add('login-mode');
+        input.disabled=true;button.disabled=true;label.textContent='Validando acesso...';errorBox.classList.add('hidden');validation.classList.remove('hidden');
+        loginProgress(15,'Validando seu e-mail...','Consultando o cadastro realizado na compra.');
+        try{
+          await req('/customer-login',{method:'POST',body:JSON.stringify({email})});
+          loginProgress(42,'Conta encontrada','Agora estamos confirmando este dispositivo.');
+          await waitForAuthorizedHealth();
+          loginProgress(82,'Dispositivo confirmado','Carregando seu plano e suas ferramentas.');
+          await boot();
+          for(let attempt=0;attempt<40&&!profilesList?.children?.length;attempt+=1)await new Promise(resolve=>setTimeout(resolve,100));
+          loginProgress(100,'Tudo pronto!','Dispositivo online e painel carregado.');
+          await new Promise(resolve=>setTimeout(resolve,450));
+          activationCard.classList.remove('login-validating');
+          activationCard.classList.add('hidden');
+          document.body.classList.remove('login-mode');
+        }catch(error){
+          activationCard.classList.remove('login-validating');
+          activationCard.classList.remove('hidden');
+          document.body.classList.add('login-mode');
+          validation.classList.add('hidden');errorBox.textContent=fixStatusEncoding(error.message||'Não foi possível entrar.');errorBox.classList.remove('hidden');
+        }finally{input.disabled=false;button.disabled=false;label.textContent='Entrar e vincular dispositivo'}
+      },true);
+    })();
     function fixStatusEncoding(value){
       let text=String(value||'');
       for(let pass=0;pass<2&&/[\u00c2\u00c3]/u.test(text);pass+=1){
@@ -678,14 +799,23 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
       }catch(_error){return null}
     };
     const renderProfilesWithMaintenance=renderProfiles;
-    renderProfiles=function(){renderProfilesWithMaintenance();(currentProfiles||[]).filter(profile=>profile&&profile.maintenance).forEach(profile=>{const key=profileKey(profile);document.querySelectorAll('[data-card-key="'+CSS.escape(key)+'"]').forEach(card=>{card.classList.add('maintenance');const actions=card.querySelector('.profile-actions');if(actions)actions.innerHTML='<span class="maintenance-label">&#128295; Manuten&ccedil;&atilde;o</span>'})})};
-    function enforceMaintenanceCards(){const maintenanceProfiles=(currentProfiles||[]).filter(profile=>profile&&profile.maintenance);document.querySelectorAll('.profile-card[data-card-key]').forEach(card=>{const key=card.dataset.cardKey||'',profileId=card.dataset.profileId||'',maintenance=maintenanceProfiles.some(profile=>profileKey(profile)===key||String(profile.profileId||'')===profileId);card.classList.toggle('maintenance',maintenance);if(maintenance){const actions=card.querySelector('.profile-actions');if(actions&&!actions.querySelector('.maintenance-label'))actions.innerHTML='<span class="maintenance-label">&#128295; Manuten&ccedil;&atilde;o</span>'}})}
+    function maintenanceRemaining(profile){const minutes=profile?.maintenanceUntil?Math.max(0,Math.ceil((new Date(profile.maintenanceUntil).getTime()-Date.now())/60000)):0;if(!minutes)return'';const hours=Math.floor(minutes/60),rest=minutes%60;return hours?hours+'h'+(rest?' '+rest+'min':''):minutes+'min'}
+    function applyMaintenanceCard(profile,card){const minutes=profile?.maintenanceUntil?Math.max(0,Math.ceil((new Date(profile.maintenanceUntil).getTime()-Date.now())/60000)):0;card.classList.add('maintenance');const badge=card.querySelector('.tool-badge'),badgeText=minutes?minutes+'min':'Manutenção';if(badge&&badge.textContent!==badgeText)badge.textContent=badgeText;const description=card.querySelector('.tool-meta small'),remaining=maintenanceRemaining(profile),descriptionMarkup='Em breve no ar!'+(remaining?' <strong>'+esc(remaining+' restantes')+'</strong>':'');if(description&&description.innerHTML!==descriptionMarkup)description.innerHTML=descriptionMarkup;const actions=card.querySelector('.profile-actions'),maintenanceMarkup='<span class="maintenance-label">&#128295; Manuten&ccedil;&atilde;o</span>';if(actions&&!actions.querySelector('.maintenance-label'))actions.innerHTML=maintenanceMarkup}
+    renderProfiles=function(){renderProfilesWithMaintenance();(currentProfiles||[]).filter(profile=>profile&&profile.maintenance).forEach(profile=>{const key=profileKey(profile);document.querySelectorAll('[data-card-key="'+CSS.escape(key)+'"]').forEach(card=>applyMaintenanceCard(profile,card))});window.markAgentContentReady?.('profiles-rendered')};
+    function enforceMaintenanceCards(){const maintenanceProfiles=(currentProfiles||[]).filter(profile=>profile&&profile.maintenance);document.querySelectorAll('.profile-card[data-card-key]').forEach(card=>{const key=card.dataset.cardKey||'',profileId=card.dataset.profileId||'',profile=maintenanceProfiles.find(item=>profileKey(item)===key||String(item.profileId||'')===profileId);card.classList.toggle('maintenance',Boolean(profile));if(profile)applyMaintenanceCard(profile,card)})}
     if(profilesList)new MutationObserver(()=>enforceMaintenanceCards()).observe(profilesList,{childList:true,subtree:true});
+    setInterval(async()=>{if(!document.hidden&&currentProfiles.some(profile=>profile?.maintenance)){try{await refreshProfilesSilent();renderCategories();renderProfiles()}catch{}}},15000);
     const checkAdspowerAuthenticated=checkAdspower;
     checkAdspower=async function(){
       try{
         const h=await fetch('/health',{cache:'no-store'}).then(r=>r.json());
         if(!h.authenticated){setBadge(adspowerHealth,'warn','AdsPower','AdsPower','Entre no painel para verificar o AdsPower.');if(headerKernelStatus?.textContent?.includes('AdsPower'))setKernelStatus('','','','');return}
+        if(!window.__sunbrowserBootstrapDone){
+          const preparation=await req('/sunbrowser-bootstrap',{method:'POST',body:'{}'});
+          window.__sunbrowserBootstrapDone=true;
+          if(preparation?.installed?.length)setKernelStatus('ready','Navegador atualizado','Atualizações do SunBrowser concluídas. Iniciando o AdsPower...','');
+        }
+        if(!window.__adspowerStartupRequested){window.__adspowerStartupRequested=true;await req('/admin/adspower/start',{method:'POST',body:'{}'}).catch(()=>null)}
         const bootstrap=await req('/admin/adspower/bootstrap-status').catch(()=>null);
         const bootstrapPending=bootstrap&&(bootstrap.inProgress||['idle','queued','starting','starting_api'].includes(String(bootstrap.status||'')));
         if(bootstrapPending){const detail='Aguarde, estamos conectando ao AdsPower...';setBadge(adspowerHealth,'checking','AdsPower','AdsPower',detail);setKernelStatus('progress','Conectando ao AdsPower',detail,'');clearTimeout(window.__adspowerCheckTimer);window.__adspowerCheckTimer=setTimeout(checkAdspower,2000);return}
@@ -706,8 +836,14 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
     };
     document.addEventListener('click',event=>{const connectButton=event.target.closest('[data-kernel-action="connect-adspower"]');if(!connectButton)return;event.preventDefault();event.stopPropagation();tryStartAdspower()},true);
     (function setupKernelInstallOverlay(){const overlay=document.querySelector('#kernelInstallOverlay'),title=document.querySelector('#kernelInstallTitle'),message=document.querySelector('#kernelInstallMessage'),progress=document.querySelector('#kernelInstallProgress'),percent=document.querySelector('#kernelInstallPercent');let safetyTimer=null;window.kernelInstallOverlayVisible=()=>!overlay.classList.contains('hidden');window.showKernelInstallOverlay=function(text='Iniciando a preparação do navegador...'){clearTimeout(safetyTimer);overlay.classList.remove('hidden');void overlay.offsetWidth;title.textContent='Preparando seu navegador';message.textContent=text;progress.classList.add('indeterminate');progress.style.width='38%';percent.textContent='Aguarde...';safetyTimer=setTimeout(()=>window.finishKernelInstallOverlay?.(false,'A preparação demorou mais que o esperado. Tente novamente.'),10*60*1000)};window.updateKernelInstallOverlay=function(data={}){const hasPercent=data.percent!==null&&data.percent!==undefined&&Number.isFinite(Number(data.percent)),value=hasPercent?Number(data.percent):null;overlay.classList.remove('hidden');title.textContent=data.status==='ready'?'Concluído':'Preparando seu navegador';message.textContent=data.message||'Aguarde enquanto preparamos tudo para abrir seu perfil.';if(hasPercent){progress.classList.remove('indeterminate');progress.style.width=Math.max(0,Math.min(100,value))+'%';percent.textContent=Math.max(0,Math.min(100,value))+'%'}else{progress.classList.add('indeterminate');progress.style.width='38%';percent.textContent=data.attempts?'Tentativa '+data.attempts+' · '+(data.elapsedSeconds||0)+'s':'Aguarde...'}};window.finishKernelInstallOverlay=function(ok,errorMessage=''){clearTimeout(safetyTimer);progress.classList.remove('indeterminate');progress.style.width='100%';title.textContent=ok?'Concluído':'Não foi possível concluir';message.textContent=ok?'Instalação concluída. Finalizando a abertura do perfil...':(errorMessage||'Tente novamente. Se o problema continuar, chame o suporte.');percent.textContent=ok?'100%':'Atenção';setTimeout(()=>overlay.classList.add('hidden'),ok?3000:5000)}})();
-    const requestBeforeKernelOverlay=req;req=async function(requestPath,options={}){const opening=requestPath==='/open',closing=requestPath==='/close';try{const response=await requestBeforeKernelOverlay(requestPath,options);if(opening&&window.kernelInstallOverlayVisible?.())window.finishKernelInstallOverlay?.(true);if(closing)setTimeout(()=>window.location.reload(),350);return response}catch(error){if(opening&&window.kernelInstallOverlayVisible?.())window.finishKernelInstallOverlay?.(false);throw error}};
+    const requestBeforeKernelOverlay=req;req=async function(requestPath,options={}){const opening=requestPath==='/open';try{const response=await requestBeforeKernelOverlay(requestPath,options);if(opening&&window.kernelInstallOverlayVisible?.())window.finishKernelInstallOverlay?.(true);return response}catch(error){if(opening&&window.kernelInstallOverlayVisible?.())window.finishKernelInstallOverlay?.(false);throw error}};
     (function attachKernelInstallEvents(){const timer=setInterval(()=>{const es=window.__runtimeEvents;if(!es||es.__kernelInstallAttached)return;es.__kernelInstallAttached=true;clearInterval(timer);es.addEventListener('kernel-install',event=>{try{const data=JSON.parse(event.data||'{}');if(data.status==='error'){window.finishKernelInstallOverlay?.(false,data.message);return}if(data.status==='ready'){window.updateKernelInstallOverlay?.(data);window.finishKernelInstallOverlay?.(true);return}window.updateKernelInstallOverlay?.(data)}catch{}})},250)})();
+    (function attachSunbrowserBootstrapEvents(){
+      const slides=document.querySelector('#sunbrowserSlides');let slideTimer=null;
+      function showSlides(items=[]){clearInterval(slideTimer);const usable=items.filter(item=>item&&(item.title||item.message||item.imageUrl));if(!usable.length){slides?.classList.add('hidden');return}let index=0;slides.classList.remove('hidden');const draw=()=>{const item=usable[index%usable.length];slides.innerHTML=(item.imageUrl?'<img src="'+esc(item.imageUrl)+'" alt="" />':'')+'<div><strong>'+esc(item.title||'Novidade NinjaFlix')+'</strong><p>'+esc(item.message||'')+'</p></div>';index+=1};draw();slideTimer=setInterval(draw,4500)}
+      const timer=setInterval(()=>{const es=window.__runtimeEvents;if(!es||es.__sunbrowserAttached)return;es.__sunbrowserAttached=true;clearInterval(timer);es.addEventListener('sunbrowser-bootstrap',event=>{try{const data=JSON.parse(event.data||'{}');if(data.experience){showSlides(data.experience.slides||[]);document.querySelector('#kernelInstallTitle').textContent=data.experience.title||'Preparando seu navegador'}window.updateKernelInstallOverlay?.(data);if(data.status==='error')window.finishKernelInstallOverlay?.(false,data.message);if(data.status==='ready'){clearInterval(slideTimer);setTimeout(()=>slides?.classList.add('hidden'),2800);window.finishKernelInstallOverlay?.(true)}}catch{}})},250);
+      const style=document.createElement('style');style.textContent='.sunbrowser-slides{display:grid;grid-template-columns:minmax(0,180px) 1fr;gap:16px;align-items:center;margin:18px 0;padding:14px;border:1px solid rgba(168,85,247,.3);border-radius:18px;background:rgba(168,85,247,.08);text-align:left}.sunbrowser-slides img{width:100%;max-height:120px;object-fit:contain;border-radius:12px}.sunbrowser-slides strong{display:block;font-size:17px}.sunbrowser-slides p{margin:7px 0 0;color:var(--muted-foreground)}@media(max-width:600px){.sunbrowser-slides{grid-template-columns:1fr}.sunbrowser-slides img{max-height:100px}}';document.head.append(style)
+    })();
     document.addEventListener('click',async event=>{
       const button=event.target.closest('[data-launch],[data-internal-nav],.expired-subscription a,.machine-support-box a,a[href*="cliente.ninjaflix.club/"]');
       if(!button)return;
@@ -731,7 +867,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
       }catch(_error){}
       if(fallback)window.location.href=fallback;
     },true);
-    async function reconcileAgentAccess(){try{const h=await fetch('/health',{cache:'no-store'}).then(r=>r.json());const panelWasOpen=!document.querySelector('#agentCard')?.classList.contains('hidden');if(h.accessIssue){renderAgentAccessIssue(h.accessIssue,h.user);return}if(h.canAccessService===false){showExpiredSubscription(h.user||{});return}if(h.canAccessService===true&&String(toolsTitle?.textContent||'').includes('Assinatura vencida')){window.location.reload();return}if((h.user&&!h.authenticated)||(!h.authenticated&&panelWasOpen))renderAgentAccessIssue({code:'session_invalid',message:h.error||'Este dispositivo perdeu a autorização. Chame o suporte.'},h.user);else if(!h.authenticated&&headerKernelStatus?.textContent?.includes('AdsPower'))setKernelStatus('','','','')}catch{}}
+    async function reconcileAgentAccess(){try{const h=await fetch('/health',{cache:'no-store'}).then(r=>r.json());const panelWasOpen=!document.querySelector('#agentCard')?.classList.contains('hidden');if(h.accessIssue){renderAgentAccessIssue(h.accessIssue,h.user);return}if(h.canAccessService===false){showExpiredSubscription(h.user||{});return}if(h.canAccessService===true&&String(toolsTitle?.textContent||'').includes('Assinatura vencida')){window.location.reload();return}if((h.user&&!h.authenticated)||(!h.authenticated&&panelWasOpen)){renderAgentAccessIssue({code:'session_invalid',message:h.error||'Este dispositivo perdeu a autorização. Chame o suporte.'},h.user);return}if(h.authenticated&&h.user){setBadge(bindBadge,'ok','Dispositivo','Aparelho','Este computador está autorizado e vinculado ao cliente logado.');if(headerKernelStatus?.textContent?.includes('Dispositivo'))setKernelStatus('','','','');if(/^Dispositivo (offline|bloqueado|em uso)/i.test(String(toolsTitle?.textContent||'')))await loadProfiles()}else if(headerKernelStatus?.textContent?.includes('AdsPower'))setKernelStatus('','','','')}catch{}}
     (function setupDesktopUpdateCenter(){
       const bridge=window.ninjaflixDesktop;
       const wrap=document.querySelector('#desktopUpdateWrap');
@@ -791,8 +927,134 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
       setInterval(refresh,5*60*1000);
       window.addEventListener('focus',refresh);
     })();
+    (function setupPersistentMarketingPopups(){
+      function desktopNotify(title,body,id){const key='ninjaflix:desktop-notification:'+String(id||title||'');if(!id||localStorage.getItem(key))return;localStorage.setItem(key,'1');window.ninjaflixDesktop?.notify?.({title:String(title||'NinjaFlix'),body:String(body||'')})}
+      const style=document.createElement('style');
+      style.textContent='.tool-card-top{display:contents!important}.tool-card-top .tool-badge{position:absolute!important;right:18px!important;top:18px!important;z-index:4!important}.favorite-toggle{position:absolute!important;right:20px!important;bottom:18px!important;top:auto!important;z-index:4!important;width:27px;height:27px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:#64748b;font-size:19px}.favorite-toggle:hover{background:transparent!important;transform:scale(1.08)!important}.favorite-toggle.is-favorite{color:#facc15}.agent-popup:not(.theme-transparent) .agent-modal{width:min(430px,calc(100vw - 32px))!important;max-width:430px!important}.agent-popup.theme-transparent{background:rgba(3,4,11,.38);backdrop-filter:blur(4px)}.agent-popup.theme-transparent .agent-modal{position:relative;max-width:min(860px,calc(100vw - 32px));padding:0;border:0;background:transparent;box-shadow:none;overflow:visible}.agent-popup.theme-transparent .modal-head{position:absolute;right:-4px;top:-42px}.agent-popup.theme-transparent .modal-head h2{display:none}.agent-popup.theme-transparent .modal-close{background:#0b0d19;border-color:rgba(255,255,255,.35)}.popup-banner{display:block;width:100%;max-height:calc(100vh - 150px);object-fit:contain;border-radius:24px}.popup-banner-action{display:flex;justify-content:center;margin-top:14px}.agent-popup.theme-transparent .popup-cta{margin:0;min-width:180px;justify-content:center}';
+      style.textContent+='.agent-popup.theme-transparent .modal-head{right:10px;top:10px;z-index:20;margin:0}.agent-popup.theme-transparent .modal-close{display:grid;place-items:center;width:44px;height:44px;border:1px solid rgba(255,255,255,.65);border-radius:999px;background:rgba(11,13,25,.9);color:#fff;font-size:22px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.5)}.agent-popup.theme-transparent #agentPopupBody{display:grid;place-items:center;max-width:100%;overflow:auto;padding:0 52px}.agent-popup.theme-transparent .popup-banner{max-width:none}';
+      style.textContent+='.agent-intro{background:#03040b!important;backdrop-filter:none!important}.agent-intro-card{width:min(510px,calc(100vw - 32px))!important}.tools-content #profilesList:empty::before{content:""!important;display:none!important}.tools-grid .profile-card{content-visibility:auto;contain-intrinsic-size:250px}.info-row .chip[class*="validity-"]{transition:color .25s ease,border-color .25s ease,background .25s ease,box-shadow .25s ease}.info-row .chip.validity-5{color:#facc15;border-color:rgba(250,204,21,.55);background:rgba(250,204,21,.08)}.info-row .chip.validity-4{color:#fbbf24;border-color:rgba(251,191,36,.62);background:rgba(251,191,36,.10)}.info-row .chip.validity-3{color:#f59e0b;border-color:rgba(245,158,11,.68);background:rgba(245,158,11,.12)}.info-row .chip.validity-2{color:#f97316;border-color:rgba(249,115,22,.74);background:rgba(249,115,22,.14)}.info-row .chip.validity-1{color:#ea580c;border-color:rgba(234,88,12,.82);background:rgba(234,88,12,.16);box-shadow:0 0 20px rgba(234,88,12,.14)}.info-row .chip.validity-0{color:#dc4a1f;border-color:rgba(220,74,31,.9);background:rgba(220,74,31,.18);box-shadow:0 0 22px rgba(220,74,31,.18)}';
+      document.head.append(style);
+      const applyUserSubscriptionBase=applyUserSubscription;
+      applyUserSubscription=function(user){const validity=applyUserSubscriptionBase(user),chip=subscriptionInfo?.closest('.chip');if(chip){chip.classList.remove('validity-5','validity-4','validity-3','validity-2','validity-1','validity-0');const due=parseLocalDate(user?.subscriptionEndsAt),today=new Date(),todayOnly=new Date(today.getFullYear(),today.getMonth(),today.getDate()),remaining=due?Math.ceil((due.getTime()-todayOnly.getTime())/86400000):null;if(Number.isFinite(remaining)&&remaining>=0&&remaining<=5)chip.classList.add('validity-'+remaining)}return validity};
+      setTimeout(()=>{const health=window.__lastAgentHealth;if(health?.user)applyUserSubscription(health.user)},500);
+      let activePopupId='',lastPopupPollAt=0;
+      function popupReadKeys(){try{const parsed=JSON.parse(localStorage.getItem('ninjaflix:popupReadKeys')||'[]');return new Set(Array.isArray(parsed)?parsed.map(String):[])}catch{return new Set()}}
+      function rememberPopupRead(key){if(!key)return;const keys=popupReadKeys();keys.add(String(key));localStorage.setItem('ninjaflix:popupReadKeys',JSON.stringify(Array.from(keys).slice(-100)));localStorage.setItem('ninjaflix:lastPopupRead',String(key))}
+      const originalCloseModal=closeModal;
+      closeModal=function(modal){if(modal===agentPopupModal&&activePopupId){rememberPopupRead(activePopupId);activePopupId=''}originalCloseModal(modal)};
+      checkPopups=async function(){
+        if(Date.now()-lastPopupPollAt<300000)return;
+        lastPopupPollAt=Date.now();
+        try{
+          const out=await req('/popups'),read=popupReadKeys(),legacy=String(localStorage.getItem('ninjaflix:lastPopupRead')||'');
+          const popup=(out.popups||[]).find(item=>{const itemId=String(item.id||item.createdAt||item.updatedAt||'');const key=itemId.startsWith('invoice_due_')?itemId:(itemId+':'+String(item.updatedAt||item.createdAt||''));return itemId&&key!==legacy&&!read.has(key)});if(!popup)return;
+          const id=String(popup.id||popup.createdAt||popup.updatedAt||'');
+          const displayKey=id.startsWith('invoice_due_')?id:(id+':'+String(popup.updatedAt||popup.createdAt||''));
+          if(!id)return;
+          activePopupId=displayKey;
+          desktopNotify(popup.title||'Aviso NinjaFlix',popup.message||'Há uma nova mensagem no painel.',displayKey);
+          const transparent=popup.theme==='transparent'&&popup.imageUrl;
+          agentPopupModal?.classList.toggle('theme-transparent',Boolean(transparent));
+          agentPopupTitle.textContent=popup.title||'Aviso';
+          const imageScale=Math.min(200,Math.max(40,Number(popup.imageScale||100)));
+          agentPopupBody.innerHTML=transparent?'<img class="popup-banner" src="'+esc(popup.imageUrl)+'" alt="'+esc(popup.title||'Banner NinjaFlix')+'" style="width:'+imageScale+'%" />':'<div class="popup-level">'+esc(popup.level||'informacoes')+'</div><div class="notice-item"><p>'+esc(popup.message||'')+'</p></div>';
+          let ctaUrl=String(popup.buttonUrl||'').trim(),ctaLabel=String(popup.buttonLabel||'').trim();
+          if(ctaUrl&&!/^(https?:|mailto:|tel:)/i.test(ctaUrl))ctaUrl='https://'+ctaUrl;
+          if(agentPopupCta&&ctaUrl&&ctaLabel){agentPopupCta.href=ctaUrl;agentPopupCta.target='_self';agentPopupCta.textContent=ctaLabel;agentPopupCta.classList.remove('hidden')}else agentPopupCta?.classList.add('hidden');
+          agentPopupModal?.classList.remove('hidden');
+        }catch{}
+      };
+      setTimeout(()=>checkPopups(),250);
+      profilesList.addEventListener('click',event=>{const button=event.target.closest('[data-favorite-profile]');if(!button)return;event.preventDefault();event.stopImmediatePropagation();const prefs=profilePreferences(),key=String(button.dataset.favoriteProfile),set=new Set(prefs.favorites||[]);set.has(key)?set.delete(key):set.add(key);prefs.favorites=Array.from(set);saveProfilePreferences(prefs);renderProfiles()},true);
+      const requestWithUsage=req;
+      req=async function(requestPath,options={}){const response=await requestWithUsage(requestPath,options);if(requestPath==='/open'){try{const body=JSON.parse(options.body||'{}');rememberProfileUse(body.cardKey||body.profileId);renderProfiles()}catch{}}return response};
+      const refreshNoticesWithDesktop=refreshNoticeIndicator;
+      let lastNoticePollAt=0;
+      refreshNoticeIndicator=async function(force=false){if(!force&&Date.now()-lastNoticePollAt<300000)return window.__lastNotices||[];lastNoticePollAt=Date.now();const notices=await refreshNoticesWithDesktop();const latest=notices?.[0],latestId=String(latest?.id||latest?.createdAt||latest?.updatedAt||'');if(latest)desktopNotify(latest.title||'Nova notificação',latest.message||'',latestId);if(latestId&&localStorage.getItem('ninjaflix:noticeDropdownDismissed')===latestId){noticeDropdown?.classList.add('hidden');noticeDropdown?.classList.remove('auto-open')}return notices};
+      document.addEventListener('click',event=>{if(event.target.closest('.notice-wrap')||noticeDropdown?.classList.contains('hidden'))return;const latest=window.__lastNotices?.[0],latestId=String(latest?.id||latest?.createdAt||latest?.updatedAt||'');if(latestId)localStorage.setItem('ninjaflix:noticeDropdownDismissed',latestId);noticeDropdown?.classList.add('hidden');noticeDropdown?.classList.remove('auto-open')},true);
+      document.querySelector('#noticeButton')?.addEventListener('click',()=>localStorage.removeItem('ninjaflix:noticeDropdownDismissed'),true);
+      document.addEventListener('click',event=>{const item=event.target.closest('[data-notice-index]');if(!item)return;const notice=window.__lastNotices?.[Number(item.dataset.noticeIndex)];if(notice?.action!=='support')return;event.preventDefault();event.stopImmediatePropagation();noticeDropdown?.classList.add('hidden');openLaunch('suporte')},true);
+      function applyBackgroundProfiles(data){
+        if(!data||!Array.isArray(data.profiles)||busyProfile)return;
+        if(data.user)applyUserSubscription(data.user);
+        currentCategories=Array.isArray(data.categories)?data.categories:currentCategories;
+        currentProfiles=data.profiles;
+        renderCategories();
+        renderProfiles();
+      }
+      let backgroundProfilesRefresh=null,lastBackgroundProfilesRefreshAt=0;
+      async function refreshProfilesInBackground(force=false){
+        if(document.hidden||backgroundProfilesRefresh||(!force&&Date.now()-lastBackgroundProfilesRefreshAt<60000))return;
+        lastBackgroundProfilesRefreshAt=Date.now();
+        backgroundProfilesRefresh=req('/profiles?refresh=1').then(applyBackgroundProfiles).catch(()=>null).finally(()=>{backgroundProfilesRefresh=null});
+        return backgroundProfilesRefresh;
+      }
+      window.ninjaflixDesktop?.onBackgroundRefresh?.(()=>refreshProfilesInBackground(false));
+      const profilesEventTimer=setInterval(()=>{
+        const events=window.__runtimeEvents;
+        if(!events||events.__profilesCacheAttached)return;
+        events.__profilesCacheAttached=true;
+        clearInterval(profilesEventTimer);
+        events.addEventListener('profiles-updated',()=>{if(backgroundProfilesRefresh)return;req('/profiles').then(applyBackgroundProfiles).catch(()=>null)});
+        events.addEventListener('notices-changed',()=>{lastNoticePollAt=0;refreshNoticeIndicator(true).catch(()=>null)});
+        events.addEventListener('popups-changed',()=>{lastPopupPollAt=0;checkPopups().catch(()=>null)});
+        events.addEventListener('subscription-updated',()=>{reconcileAgentAccess();refreshProfilesInBackground(true)});
+        events.addEventListener('desktop-update-changed',()=>window.ninjaflixDesktop?.requestUpdateCheck?.());
+      },250);
+    })();
+    (function setupSupportLiveChat(){
+      const button=document.querySelector('#supportChatButton'),panel=document.querySelector('#supportChatPanel'),closeButton=document.querySelector('#supportChatClose'),body=document.querySelector('#supportChatBody'),unread=document.querySelector('#supportChatUnread');
+      if(!button||!panel||!body)return;
+      let topics=[
+        {id:'assinatura_pagamentos',title:'Assinatura e pagamentos',description:'Planos, renovações e cobranças.'},
+        {id:'problemas_acesso',title:'Problemas no acesso',description:'Login, desconexão e abertura de ferramentas.'},
+        {id:'duvidas_ferramentas',title:'Dúvidas sobre as ferramentas',description:'Funcionalidades, tutoriais e ajustes.',tools:true},
+        {id:'ferramentas_deslogadas',title:'Ferramentas deslogadas',description:'Falhas, indisponibilidade e reconexão.',tools:true},
+        {id:'outros_assuntos',title:'Outros assuntos',description:'Demais solicitações.'}
+      ];
+      let quickReplies=['Ferramenta deslogada','Ferramenta indisponível','Ferramenta sem assinatura válida','Ferramenta offline','Sem créditos','Outros'];
+      const style=document.createElement('style');
+      style.textContent='.support-chat-button{position:fixed;right:28px;bottom:24px;z-index:1450;display:flex;align-items:center;gap:9px;width:auto!important;min-height:48px;padding:8px 16px 8px 8px;border:1px solid rgba(192,132,252,.58);border-radius:999px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;font-weight:900;box-shadow:0 18px 50px rgba(76,29,149,.42)}.support-chat-icon{width:31px;height:31px;display:grid;place-items:center;border-radius:999px;background:rgba(255,255,255,.18);font-size:17px}.support-chat-button b{position:absolute;right:-4px;top:-5px;min-width:21px;height:21px;display:grid;place-items:center;border:2px solid #080912;border-radius:999px;background:#ef4444;color:#fff;font-size:10px}.support-chat-panel{position:fixed;right:28px;bottom:84px;z-index:1450;width:min(430px,calc(100vw - 32px));height:min(650px,calc(100vh - 120px));display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;border:1px solid rgba(168,85,247,.55);border-radius:24px;background:#0b0c18;color:#f8f7ff;box-shadow:0 28px 90px rgba(0,0,0,.62)}.support-chat-panel>header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid rgba(148,163,184,.18);background:linear-gradient(135deg,rgba(124,58,237,.28),rgba(11,12,24,.96))}.support-chat-panel>header div{display:grid}.support-chat-panel>header small{color:#aaa8bf}.support-chat-panel>header button{width:32px;height:32px;padding:0;border:0;background:transparent;color:inherit;font-size:24px}.support-chat-body{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;padding:0}.support-chat-body.new-ticket{display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding:16px;scrollbar-width:thin;scrollbar-color:#8b5cf6 transparent}.support-chat-loading,.support-chat-empty{margin:auto;color:#aaa8bf;text-align:center}.support-chat-ticket-title{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(148,163,184,.14);background:rgba(18,20,37,.82)}.support-chat-ticket-title span{display:grid}.support-chat-ticket-title small{color:#aaa8bf}.support-chat-messages{min-height:0;display:flex;flex-direction:column;gap:12px;overflow-y:auto;overscroll-behavior:contain;padding:16px;scrollbar-width:thin;scrollbar-color:#8b5cf6 transparent}.support-chat-messages::-webkit-scrollbar,.support-chat-body.new-ticket::-webkit-scrollbar,.support-chat-tools::-webkit-scrollbar{width:6px}.support-chat-messages::-webkit-scrollbar-track,.support-chat-body.new-ticket::-webkit-scrollbar-track,.support-chat-tools::-webkit-scrollbar-track{background:transparent}.support-chat-messages::-webkit-scrollbar-thumb,.support-chat-body.new-ticket::-webkit-scrollbar-thumb,.support-chat-tools::-webkit-scrollbar-thumb{border-radius:999px;background:linear-gradient(#c084fc,#7c3aed)}.support-chat-message{align-self:flex-end;max-width:84%;padding:11px 13px;border:1px solid rgba(192,132,252,.5);border-radius:17px 17px 5px 17px;background:linear-gradient(135deg,rgba(124,58,237,.42),rgba(88,28,135,.28));box-shadow:0 6px 22px rgba(76,29,149,.12)}.support-chat-message.admin{align-self:flex-start;border-color:rgba(148,163,184,.25);border-radius:17px 17px 17px 5px;background:#171928}.support-chat-message small{display:block;margin-bottom:5px;color:#c4b5fd;font-size:10px;font-weight:800}.support-chat-message.admin small{color:#b8bdd0}.support-chat-message p{margin:0;white-space:pre-wrap;line-height:1.48}.support-chat-compose{display:grid;gap:8px;margin:0;padding:12px 14px 14px;border-top:1px solid rgba(148,163,184,.16);background:#0f1020;box-shadow:0 -12px 30px rgba(4,5,12,.45)}.support-chat-body.new-ticket .support-chat-compose{margin-top:auto;padding:0;border:0;background:transparent;box-shadow:none}.support-chat-compose textarea{min-height:66px;max-height:120px;resize:vertical;border:1px solid rgba(168,85,247,.42);border-radius:14px;background:#080914;color:#fff;padding:11px 12px;font:inherit;outline:none}.support-chat-compose textarea:focus{border-color:#a855f7;box-shadow:0 0 0 3px rgba(168,85,247,.14)}.support-chat-compose button{min-height:43px;border:1px solid #c084fc!important;background:linear-gradient(135deg,#a855f7,#7c3aed)!important;color:#fff!important;font-weight:900!important;box-shadow:0 9px 24px rgba(124,58,237,.28)}.support-chat-compose button:disabled{opacity:.65;cursor:wait}.support-chat-topics,.support-chat-tools{display:grid;gap:8px}.support-chat-choice{display:grid!important;gap:3px;width:100%!important;padding:12px!important;text-align:left!important;border:1px solid rgba(148,163,184,.2)!important;border-radius:14px!important;background:#121425!important;color:inherit!important}.support-chat-choice small{color:#aaa8bf;font-weight:500}.support-chat-tools{max-height:300px;overflow:auto;scrollbar-width:thin;scrollbar-color:#8b5cf6 transparent}.support-chat-tool{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(148,163,184,.18);border-radius:11px;background:#121425}.support-chat-tool input{width:auto}.support-chat-step-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.support-chat-step-head div{display:grid;gap:3px}.support-chat-step-head small{color:#aaa8bf}.support-chat-back{width:auto!important;padding:6px 9px!important;background:transparent!important}.support-chat-error{padding:9px 11px;border:1px solid rgba(251,113,133,.4);border-radius:12px;color:#fecdd3;background:rgba(251,113,133,.08)}.support-chat-panel.light{background:#fff;color:#20172d;border-color:#d8b4fe;box-shadow:0 28px 90px rgba(45,24,73,.24)}.support-chat-panel.light>header{background:linear-gradient(135deg,#f5edff,#fff);border-color:#eadcf8}.support-chat-panel.light>header small,.support-chat-panel.light .support-chat-ticket-title small,.support-chat-panel.light .support-chat-step-head small,.support-chat-panel.light .support-chat-choice small{color:#71677e}.support-chat-panel.light .support-chat-ticket-title{background:#faf7ff;border-color:#eadcf8}.support-chat-panel.light .support-chat-message.admin{background:#f4f1f7;border-color:#ded8e5;color:#2a2232}.support-chat-panel.light .support-chat-message.admin small{color:#665d70}.support-chat-panel.light .support-chat-message.customer{background:linear-gradient(135deg,#8b5cf6,#6d28d9);border-color:#8b5cf6;color:#fff}.support-chat-panel.light .support-chat-message.customer small{color:#eee5ff}.support-chat-panel.light .support-chat-compose{background:#fff;border-color:#eadcf8;box-shadow:0 -12px 28px rgba(76,29,149,.08)}.support-chat-panel.light .support-chat-compose textarea{background:#faf8fc;color:#20172d;border-color:#d8c8e8}.support-chat-panel.light .support-chat-choice,.support-chat-panel.light .support-chat-tool{background:#faf8fc;border-color:#e7dcef;color:#20172d!important}body.login-mode .support-chat-button,body.login-mode .support-chat-panel{display:none!important}@media(max-width:600px){.support-chat-button{right:14px;bottom:14px}.support-chat-panel{right:8px;bottom:72px;width:calc(100vw - 16px);height:calc(100vh - 90px);border-radius:20px}}';
+      style.textContent+=' .support-chat-search{width:100%;min-height:42px;padding:9px 11px;border:1px solid rgba(168,85,247,.35);border-radius:12px;background:#080914;color:inherit;font:inherit;outline:none}.support-chat-search:focus{border-color:#a855f7;box-shadow:0 0 0 3px rgba(168,85,247,.12)}.support-chat-quick-replies{display:grid;gap:8px}.support-chat-quick-choice{font-weight:500!important}.support-chat-quick-choice strong{font-weight:500}.support-chat-panel.light .support-chat-search{background:#faf8fc;border-color:#d8c8e8;color:#20172d}';
+      style.textContent+=' .support-chat-panel{overflow:visible}.support-chat-panel>header{position:relative;border-radius:23px 23px 0 0}.support-chat-panel>header>button{position:absolute;right:2px;top:-43px;width:34px!important;height:34px!important;display:grid!important;place-items:center!important;border:1px solid rgba(192,132,252,.5)!important;border-radius:999px!important;background:#111222!important;color:#fff!important;font-family:Arial,sans-serif!important;font-size:24px!important;font-weight:400!important;line-height:1!important;box-shadow:0 10px 28px rgba(0,0,0,.38)}.support-chat-panel.light>header>button{background:#fff!important;color:#2a1738!important}.support-chat-body{border-radius:0 0 23px 23px;background:#0b0c18}.support-chat-panel.light .support-chat-body{background:#fff}';
+      document.head.append(style);
+      let tickets=[],stage=0,category='',selectedTools=new Set(),loadPromise=null,loadQueued=false,sending=false;
+      function operationId(prefix){return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10)}
+      function syncTheme(){const declared=String(document.documentElement.dataset.theme||document.body.dataset.theme||localStorage.getItem('theme')||'').toLowerCase();let light=/light|claro/.test(declared)||document.documentElement.classList.contains('light')||document.body.classList.contains('light')||document.body.classList.contains('light-mode');if(!declared&&!light){const rgb=getComputedStyle(document.body).backgroundColor.match(/[\d.]+/g);if(rgb&&rgb.length>=3)light=(Number(rgb[0])+Number(rgb[1])+Number(rgb[2]))/3>185}panel.classList.toggle('light',light)}
+      function activeTicket(){return tickets.find(ticket=>ticket&&ticket.status!=='closed'&&!ticket.archived)||null}
+      function latestAdminId(){for(const ticket of tickets){const messages=Array.isArray(ticket.messages)?ticket.messages:[];for(let i=messages.length-1;i>=0;i-=1)if(messages[i]?.from==='admin')return String(messages[i].id||messages[i].createdAt||'')}return''}
+      function updateUnread(){const latest=latestAdminId(),read=localStorage.getItem('ninjaflix:support-last-read')||'',count=latest&&latest!==read?1:0;unread.textContent=String(count);unread.classList.toggle('hidden',!count);button.classList.toggle('has-unread',Boolean(count))}
+      function markRead(){const latest=latestAdminId();if(latest)localStorage.setItem('ninjaflix:support-last-read',latest);updateUnread()}
+      function messagesMarkup(ticket){return (ticket.messages||[]).map(message=>'<div class="support-chat-message '+(message.from==='admin'?'admin':'customer')+'"><small>'+(message.from==='admin'?'Suporte NinjaFlix':'Você')+' · '+new Date(message.createdAt||Date.now()).toLocaleString('pt-BR')+'</small><p>'+esc(message.message||'')+'</p></div>').join('')}
+      function scrollMessagesToEnd(){const messages=body.querySelector('.support-chat-messages');if(messages)requestAnimationFrame(()=>{messages.scrollTop=messages.scrollHeight})}
+      function renderTicket(ticket){body.classList.remove('new-ticket');body.innerHTML='<div class="support-chat-ticket-title"><span><strong>'+esc(ticket.categoryLabel||ticket.subject||'Atendimento')+'</strong><small>Ticket em andamento</small></span><span class="tool-badge">'+supportStatusText(ticket.status)+'</span></div><div class="support-chat-messages" role="log" aria-live="polite">'+messagesMarkup(ticket)+'</div><form id="supportChatReply" class="support-chat-compose"><textarea name="message" placeholder="Digite sua mensagem..." maxlength="4000" required></textarea><button type="submit">Enviar mensagem</button><div class="support-chat-send-status" aria-live="polite"></div></form>';scrollMessagesToEnd();body.querySelector('#supportChatReply')?.addEventListener('submit',sendReply)}
+      function availableToolNames(){const names=[];uniqueProfilesWithCategories().filter(profile=>profileIsAvailable(profile)).forEach(profile=>{const name=String(profile.name||'').trim();if(name&&!names.includes(name))names.push(name)});return names.sort((a,b)=>a.localeCompare(b,'pt-BR'))}
+      function renderNewTicket(){
+        body.classList.add('new-ticket');
+        if(stage===0){body.innerHTML='<div class="support-chat-step-head"><div><strong>Como podemos ajudar?</strong><small>Escolha o assunto do atendimento.</small></div></div><div class="support-chat-topics">'+topics.map(topic=>'<button class="support-chat-choice" type="button" data-support-topic="'+topic.id+'"><strong>'+esc(topic.title)+'</strong><small>'+esc(topic.description)+'</small></button>').join('')+'</div>';return}
+        const topic=topics.find(item=>item.id===category)||topics[topics.length-1];
+        if(stage===1&&topic.tools){const tools=availableToolNames();body.innerHTML='<div class="support-chat-step-head"><div><strong>Selecione as ferramentas</strong><small>Marque uma ou mais opções relacionadas.</small></div><button class="support-chat-back" data-support-back type="button">Voltar</button></div><input class="support-chat-search" data-support-tool-search type="search" placeholder="Buscar ferramenta..." autocomplete="off"><div class="support-chat-tools">'+(tools.length?tools.map(name=>'<label class="support-chat-tool" data-support-tool-name="'+esc(name.toLocaleLowerCase('pt-BR'))+'"><input type="checkbox" value="'+esc(name)+'" '+(selectedTools.has(name)?'checked':'')+'/><span>'+esc(name)+'</span></label>').join(''):'<div class="support-chat-empty">Nenhuma ferramenta disponível.</div>')+'<div class="support-chat-empty hidden" data-support-search-empty>Nenhuma ferramenta encontrada.</div></div><button data-support-tools-next type="button">Continuar</button>';return}
+        const quick=category==='ferramentas_deslogadas'?'<div class="support-chat-quick-replies">'+quickReplies.map(text=>'<button class="support-chat-choice support-chat-quick-choice" data-support-chat-quick="'+esc(text)+'" type="button">'+esc(text)+'</button>').join('')+'</div>':'';
+        body.innerHTML='<div class="support-chat-step-head"><div><strong>'+esc(topic.title)+'</strong><small>Conte o que aconteceu.</small></div><button class="support-chat-back" data-support-back type="button">Voltar</button></div>'+quick+'<form id="supportChatCreate" class="support-chat-compose"><textarea name="message" placeholder="Descreva sua solicitação" required></textarea><button type="submit">Abrir solicitação</button></form>';body.querySelector('#supportChatCreate')?.addEventListener('submit',createTicket)
+      }
+      function render(){const active=activeTicket();if(active)renderTicket(active);else renderNewTicket()}
+      async function load(options={}){if(loadPromise){loadQueued=true;return loadPromise}loadPromise=req('/support-tickets').then(out=>{tickets=Array.isArray(out.tickets)?out.tickets:[];if(Array.isArray(out.config?.topics)&&out.config.topics.length)topics=out.config.topics;if(Array.isArray(out.config?.quickReplies)&&out.config.quickReplies.length)quickReplies=out.config.quickReplies;button.classList.remove('hidden');updateUnread();if(!panel.classList.contains('hidden')){render();if(options.markRead)markRead()}}).catch(()=>{if(!tickets.length)button.classList.add('hidden')}).finally(()=>{loadPromise=null;if(loadQueued){loadQueued=false;setTimeout(()=>load(options),0)}});return loadPromise}
+      async function createTicket(event){event.preventDefault();if(sending)return;const form=event.currentTarget,message=String(new FormData(form).get('message')||'').trim();if(!message)return;const submit=form.querySelector('button[type="submit"]'),requestId=operationId('ticket');sending=true;submit.disabled=true;submit.textContent='Enviando...';try{await req('/support-tickets',{method:'POST',body:JSON.stringify({category,message,tools:Array.from(selectedTools),clientRequestId:requestId})});stage=0;category='';selectedTools.clear();await load({markRead:true})}catch(error){form.querySelector('.support-chat-error')?.remove();form.insertAdjacentHTML('beforeend','<div class="support-chat-error">'+esc(error.message||'NÃ£o foi possÃ­vel abrir a solicitaÃ§Ã£o. Tente novamente.')+'</div>');submit.disabled=false;submit.textContent='Abrir solicitaÃ§Ã£o'}finally{sending=false}}
+      async function sendReply(event){event.preventDefault();if(sending)return;const ticket=activeTicket(),form=event.currentTarget,textarea=form.querySelector('textarea'),message=String(textarea?.value||'').trim();if(!ticket||!message)return;const submit=form.querySelector('button'),status=form.querySelector('.support-chat-send-status'),messageId=operationId('message');sending=true;submit.disabled=true;submit.textContent='Enviando...';if(status)status.textContent='';try{await req('/support-tickets/'+encodeURIComponent(ticket.id)+'/messages',{method:'POST',body:JSON.stringify({message,clientMessageId:messageId})});textarea.value='';await load({markRead:true})}catch(error){if(status){status.className='support-chat-send-status support-chat-error';status.textContent=error.message||'Falha ao enviar. Sua mensagem foi mantida para tentar novamente.'}submit.disabled=false;submit.textContent='Enviar mensagem'}finally{sending=false}}
+      button.addEventListener('click',async()=>{panel.classList.toggle('hidden');if(!panel.classList.contains('hidden')){syncTheme();await load({markRead:true})}});
+      closeButton.addEventListener('click',()=>{panel.classList.add('hidden');markRead()});
+      document.addEventListener('click',event=>{if(panel.classList.contains('hidden')||event.target.closest('#supportChatPanel')||event.target.closest('#supportChatButton'))return;panel.classList.add('hidden');markRead()},true);
+      body.addEventListener('click',event=>{const topicButton=event.target.closest('[data-support-topic]');if(topicButton){category=topicButton.dataset.supportTopic;selectedTools.clear();stage=(topics.find(item=>item.id===category)?.tools)?1:2;render();return}if(event.target.closest('[data-support-back]')){stage=Math.max(0,stage-1);render();return}if(event.target.closest('[data-support-tools-next]')){selectedTools=new Set(Array.from(body.querySelectorAll('.support-chat-tool input:checked')).map(input=>input.value));stage=2;render();return}const quick=event.target.closest('[data-support-chat-quick]');if(quick){const textarea=body.querySelector('textarea[name="message"]');if(textarea){textarea.value=quick.dataset.supportChatQuick||'';textarea.focus()}}});
+      body.addEventListener('input',event=>{if(!event.target.matches('[data-support-tool-search]'))return;const query=String(event.target.value||'').trim().toLocaleLowerCase('pt-BR');let visible=0;body.querySelectorAll('[data-support-tool-name]').forEach(item=>{const show=!query||String(item.dataset.supportToolName||'').includes(query);item.classList.toggle('hidden',!show);if(show)visible+=1});body.querySelector('[data-support-search-empty]')?.classList.toggle('hidden',visible>0)});
+      const observer=new MutationObserver(()=>{if(!agentCard?.classList.contains('hidden'))load()});if(agentCard)observer.observe(agentCard,{attributes:true,attributeFilter:['class']});
+      new MutationObserver(syncTheme).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-theme']});syncTheme();
+      const eventTimer=setInterval(()=>{const events=window.__runtimeEvents;if(!events||events.__supportChatAttached)return;events.__supportChatAttached=true;clearInterval(eventTimer);events.addEventListener('support-chat-changed',()=>load({markRead:!panel.classList.contains('hidden')}))},250);
+      setTimeout(()=>{if(!agentCard?.classList.contains('hidden'))load()},900);setInterval(()=>{if(!document.hidden&&!agentCard?.classList.contains('hidden'))load()},60000)
+    })();
+    const reconcileAgentAccessVisible=reconcileAgentAccess;
+    reconcileAgentAccess=async function(){if(document.hidden)return;return reconcileAgentAccessVisible()};
     setTimeout(reconcileAgentAccess,1200);
-    setInterval(reconcileAgentAccess,5000);
+    setInterval(reconcileAgentAccess,120000);
   </script>
 </body>
 </html>`;
@@ -951,16 +1213,33 @@ function buildMachineInfo() {
 }
 
 async function portalRequest(path, options = {}) {
+  const controller = new AbortController();
+  const timeoutMs = Number(options.timeoutMs || PORTAL_REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const headers = {
     'Content-Type': 'application/json',
     ...(state.agentToken ? { 'X-Agent-Token': state.agentToken } : {}),
     ...(options.headers || {})
   };
 
-  const response = await fetch(`${PORTAL_URL}${path}`, {
-    ...options,
-    headers
-  });
+  let response;
+  try {
+    const { timeoutMs: _ignoredTimeout, ...fetchOptions } = options;
+    response = await fetch(`${PORTAL_URL}${path}`, {
+      ...fetchOptions,
+      headers,
+      signal: options.signal || controller.signal
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      const timeoutError = new Error('O dashboard demorou para responder. Usando os dados salvos nesta máquina.');
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const text = await response.text();
   let payload = {};
@@ -1044,13 +1323,16 @@ async function authenticateByMachine() {
   });
   state.agentToken = payload.agentSessionToken || state.agentToken;
   state.user = payload.user || null;
+  heartbeatCache = { checkedAt: 0, payload: null };
   return payload;
 }
 
 async function ensureMachineAuthenticated() {
   if (state.agentToken && state.user) return { user: state.user, machine: state.machine };
   if (state.rememberedEmail || (state.user && state.user.email)) {
-    return refreshCustomerSession();
+    if (machineAuthInFlight) return machineAuthInFlight;
+    machineAuthInFlight = refreshCustomerSession().finally(() => { machineAuthInFlight = null; });
+    return machineAuthInFlight;
   }
   const error = new Error('Informe o e-mail usado no checkout antes de acessar os perfis.');
   error.status = 401;
@@ -1062,6 +1344,12 @@ function logout() {
   state.user = null;
   state.rememberedEmail = null;
   state.currentProfileSession = null;
+  state.cachedProfiles = null;
+  heartbeatCache = { checkedAt: 0, payload: null };
+  heartbeatInFlight = null;
+  machineAuthInFlight = null;
+  if (catalogEventStreamController) catalogEventStreamController.abort();
+  if (catalogRefreshTimer) clearTimeout(catalogRefreshTimer);
   state.extensionSessions.clear();
   state.machine = buildMachineInfo();
   clearLocalState();
@@ -1371,6 +1659,67 @@ async function downloadKernelPackage(item, targetPath) {
   }
 }
 
+let sunbrowserBootstrapInFlight = null;
+async function installSunbrowserExecutable(installerPath) {
+  return new Promise((resolve, reject) => {
+    execFile(installerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'], {
+      windowsHide: true,
+      timeout: 15 * 60 * 1000,
+      maxBuffer: 1024 * 1024
+    }, (error, stdout = '', stderr = '') => {
+      if (error) return reject(new Error(String(stderr || stdout || error.message).trim()));
+      resolve();
+    });
+  });
+}
+
+async function ensurePublishedSunbrowserUpdates(options = {}) {
+  if (process.platform !== 'win32') return { ok: true, skipped: true, reason: 'platform', installed: [] };
+  if (sunbrowserBootstrapInFlight) return sunbrowserBootstrapInFlight;
+  const previousCheck = new Date(loadLocalState().sunbrowserLastCheckedAt || 0).getTime();
+  if (!options.force && Number.isFinite(previousCheck) && Date.now() - previousCheck < 6 * 60 * 60 * 1000) {
+    return { ok: true, alreadyChecked: true, installed: [], checkedAt: new Date(previousCheck).toISOString() };
+  }
+  sunbrowserBootstrapInFlight = (async () => {
+    const plan = await portalRequestWithSessionRefresh('/api/agent/sunbrowser-bootstrap', { method: 'GET' });
+    const updates = (Array.isArray(plan.updates) ? plan.updates : []).filter((item) => !kernelIsInstalled(item.kernelVersion, item.build));
+    if (!updates.length) {
+      const checkedAt = new Date().toISOString();
+      saveLocalState({ sunbrowserLastCheckedAt: checkedAt });
+      return { ok: true, alreadyUpdated: true, installed: [], checkedAt, experience: plan.experience || null };
+    }
+    const workRoot = path.join(os.tmpdir(), 'ninjaflix-sunbrowser-bootstrap');
+    fs.mkdirSync(workRoot, { recursive: true });
+    await stopAdspowerProcesses();
+    const installed = [];
+    emitRuntimeEvent('sunbrowser-bootstrap', { status: 'starting', percent: 1, message: 'Verificando atualizações do navegador...', experience: plan.experience || null });
+    try {
+      for (let index = 0; index < updates.length; index += 1) {
+        const item = updates[index];
+        const installerPath = path.join(workRoot, `${item.id}.exe`);
+        fs.rmSync(installerPath, { force: true });
+        const startPercent = Math.round((index / updates.length) * 90);
+        emitRuntimeEvent('sunbrowser-bootstrap', { status: 'downloading', percent: Math.max(2, startPercent), message: `Baixando SunBrowser ${item.kernelVersion} (${index + 1} de ${updates.length})...`, experience: plan.experience || null });
+        await downloadKernelPackage(item, installerPath);
+        emitRuntimeEvent('sunbrowser-bootstrap', { status: 'installing', percent: Math.round(((index + 0.75) / updates.length) * 90), message: `Instalando SunBrowser ${item.kernelVersion}. Não feche o painel...`, experience: plan.experience || null });
+        await installSunbrowserExecutable(installerPath);
+        if (!kernelIsInstalled(item.kernelVersion, item.build)) throw new Error(`Não foi possível confirmar a instalação do SunBrowser ${item.kernelVersion}.`);
+        installed.push({ id: item.id, kernelVersion: item.kernelVersion, build: item.build });
+        fs.rmSync(installerPath, { force: true });
+      }
+      saveLocalState({ sunbrowserBootstrapCompletedAt: new Date().toISOString(), sunbrowserLastCheckedAt: new Date().toISOString(), sunbrowserInstalledUpdates: installed });
+      emitRuntimeEvent('sunbrowser-bootstrap', { status: 'ready', percent: 100, message: 'Atualizações concluídas. Iniciando o AdsPower...', experience: plan.experience || null });
+      return { ok: true, installed, experience: plan.experience || null };
+    } catch (error) {
+      emitRuntimeEvent('sunbrowser-bootstrap', { status: 'error', percent: null, message: error.message || 'Falha ao atualizar o SunBrowser.', experience: plan.experience || null });
+      throw error;
+    } finally {
+      for (const item of updates) fs.rmSync(path.join(workRoot, `${item.id}.exe`), { force: true });
+    }
+  })().finally(() => { sunbrowserBootstrapInFlight = null; });
+  return sunbrowserBootstrapInFlight;
+}
+
 async function extractAndValidateKernel(zipPath, temporaryRoot, item) {
   const script = [
     "$zip=$args[0];$dest=$args[1]",
@@ -1567,6 +1916,10 @@ async function waitForAdspowerApi(timeoutMs = 30000) {
 
 function launchAdspower(customPath = '') {
   if (customPath) saveLocalState({ adspowerExePath: String(customPath).trim() });
+  const bootstrapAge = Date.now() - new Date(adspowerBootstrapState.updatedAt || 0).getTime();
+  if (!customPath && ['online', 'running'].includes(adspowerBootstrapState.status) && bootstrapAge < 5 * 60 * 1000) {
+    return Promise.resolve(getBootstrapState());
+  }
   withDefaultBootstrapState();
 
   const exePath = customPath && fs.existsSync(String(customPath).trim()) ? String(customPath).trim() : findAdspowerExecutable();
@@ -1744,12 +2097,16 @@ async function login(body) {
 
   state.agentToken = payload.agentToken || state.agentToken;
   state.user = payload.user || null;
+  heartbeatCache = { checkedAt: 0, payload: null };
   state.rememberedEmail = state.user && state.user.email || state.rememberedEmail;
   if (state.user || state.rememberedEmail) saveLocalState({ email: state.rememberedEmail, user: state.user });
   return payload;
 }
 
 async function customerLogin(body) {
+  const previousEmail = String(state.user?.email || state.rememberedEmail || '').trim().toLowerCase();
+  const requestedEmail = String(body.email || body.customerEmail || '').trim().toLowerCase();
+  if (previousEmail && requestedEmail && previousEmail !== requestedEmail) state.cachedProfiles = null;
   state.machine = buildMachineInfo();
   const payload = await portalRequest('/api/agent/customer-login', {
     method: 'POST',
@@ -1761,32 +2118,38 @@ async function customerLogin(body) {
   });
   state.agentToken = payload.agentSessionToken || state.agentToken;
   state.user = payload.user || null;
+  heartbeatCache = { checkedAt: 0, payload: null };
   state.rememberedEmail = (state.user && state.user.email) || body.email || body.customerEmail || state.rememberedEmail;
-  saveLocalState({ email: state.rememberedEmail, user: state.user });
+  saveLocalState({ email: state.rememberedEmail, user: state.user, cachedProfiles: state.cachedProfiles });
   return payload;
 }
 
-async function heartbeat() {
+async function heartbeat(options = {}) {
   if (!state.agentToken) return { ok: false, authenticated: false };
-  state.machine = buildMachineInfo();
-  const payload = await portalRequestWithSessionRefresh('/api/agent/heartbeat', {
-    method: 'POST',
-    body: JSON.stringify({
-      machineFingerprint: state.machine.fingerprint,
-      machineInfo: state.machine
-    })
-  });
-  if (payload.user) {
-    state.user = payload.user;
-    saveLocalState({ email: state.rememberedEmail || state.user.email, user: state.user });
+  if (!options.force && heartbeatCache.payload && Date.now() - heartbeatCache.checkedAt < HEARTBEAT_CACHE_TTL_MS) {
+    return heartbeatCache.payload;
   }
-  return payload;
+  if (heartbeatInFlight) return heartbeatInFlight;
+  heartbeatInFlight = (async () => {
+    state.machine = buildMachineInfo();
+    const payload = await portalRequestWithSessionRefresh('/api/agent/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({
+        machineFingerprint: state.machine.fingerprint,
+        machineInfo: state.machine
+      })
+    });
+    if (payload.user) {
+      state.user = payload.user;
+      saveLocalState({ email: state.rememberedEmail || state.user.email, user: state.user });
+    }
+    heartbeatCache = { checkedAt: Date.now(), payload };
+    return payload;
+  })().finally(() => { heartbeatInFlight = null; });
+  return heartbeatInFlight;
 }
 
-async function listProfiles() {
-  await ensureMachineAuthenticated();
-  try { await heartbeat(); } catch (_error) {}
-  const payload = await portalRequestWithSessionRefresh('/api/agent/profiles', { method: 'GET' });
+function normalizeDashboardProfiles(payload) {
   if (payload.user) {
     state.user = payload.user;
     saveLocalState({ email: state.rememberedEmail || state.user.email, user: state.user });
@@ -1806,6 +2169,164 @@ async function listProfiles() {
     return { ...profile, category: categoryNames[0], categoryNames };
   });
   return payload;
+}
+
+function cachedProfilesForCurrentUser() {
+  const cached = state.cachedProfiles;
+  if (!cached?.payload || !cached.savedAt) return null;
+  const cachedEmail = String(cached.userEmail || '').trim().toLowerCase();
+  const currentEmail = String(state.user?.email || state.rememberedEmail || '').trim().toLowerCase();
+  if (cachedEmail && currentEmail && cachedEmail !== currentEmail) return null;
+  const ageMs = Date.now() - new Date(cached.savedAt).getTime();
+  if (!Number.isFinite(ageMs) || ageMs > DASHBOARD_PROFILES_MAX_STALE_MS) return null;
+  return { ...cached, ageMs };
+}
+
+async function refreshDashboardProfiles() {
+  if (dashboardProfilesRefreshInFlight) return dashboardProfilesRefreshInFlight;
+  dashboardProfilesRefreshInFlight = (async () => {
+    await ensureMachineAuthenticated();
+    const payload = normalizeDashboardProfiles(await portalRequestWithSessionRefresh('/api/agent/profiles', { method: 'GET' }));
+    const cachedProfiles = {
+      savedAt: new Date().toISOString(),
+      userEmail: String(payload.user?.email || state.user?.email || state.rememberedEmail || '').trim().toLowerCase(),
+      payload
+    };
+    state.cachedProfiles = cachedProfiles;
+    saveLocalState({ cachedProfiles });
+    emitRuntimeEvent('profiles-updated', { savedAt: cachedProfiles.savedAt });
+    return { ...payload, cached: false, cacheSavedAt: cachedProfiles.savedAt };
+  })().finally(() => { dashboardProfilesRefreshInFlight = null; });
+  return dashboardProfilesRefreshInFlight;
+}
+
+async function listProfiles(options = {}) {
+  const cached = cachedProfilesForCurrentUser();
+  if (!options.forceRefresh && cached) {
+    if (cached.ageMs > DASHBOARD_PROFILES_CACHE_TTL_MS) void refreshDashboardProfiles().catch(() => null);
+    return { ...cached.payload, cached: true, stale: cached.ageMs > DASHBOARD_PROFILES_CACHE_TTL_MS, cacheSavedAt: cached.savedAt };
+  }
+  try {
+    return await refreshDashboardProfiles();
+  } catch (error) {
+    if (cached) return { ...cached.payload, cached: true, stale: true, cacheFallback: true, cacheSavedAt: cached.savedAt };
+    throw error;
+  }
+}
+
+function currentCatalogRevision() {
+  return Math.max(0, Number(state.cachedProfiles?.payload?.catalogRevision || 0));
+}
+
+function scheduleCatalogRefresh(event = {}) {
+  const revision = Math.max(0, Number(event.revision || 0));
+  if (revision <= currentCatalogRevision()) return;
+  if (catalogRefreshTimer) clearTimeout(catalogRefreshTimer);
+  const jitterMs = 250 + Math.floor(Math.random() * 1250);
+  catalogRefreshTimer = setTimeout(() => {
+    catalogRefreshTimer = null;
+    void refreshDashboardProfiles().catch(() => null);
+  }, jitterMs);
+}
+
+function handleAgentDataEvent(event = {}) {
+  const scope = String(event.scope || '').trim().toLowerCase();
+  if (!scope) return;
+  if (scope === 'notices') emitRuntimeEvent('notices-changed', event);
+  if (scope === 'support') emitRuntimeEvent('support-chat-changed', event);
+  if (scope === 'popups' || (scope === 'support' && event.status === 'closed')) emitRuntimeEvent('popups-changed', event);
+  if (scope === 'updates') emitRuntimeEvent('desktop-update-changed', event);
+  if (scope === 'subscription' || scope === 'access') {
+    heartbeatCache = { checkedAt: 0, payload: null };
+    void heartbeat({ force: true })
+      .then((health) => {
+        emitRuntimeEvent('subscription-updated', { ...event, health });
+        emitRuntimeEvent('popups-changed', event);
+        emitRuntimeEvent('notices-changed', event);
+        return refreshDashboardProfiles();
+      })
+      .catch((error) => emitRuntimeEvent('subscription-updated', { ...event, error: error.message || 'Acesso atualizado' }));
+  }
+  if (scope === 'sunbrowser') {
+    saveLocalState({ sunbrowserLastCheckedAt: null });
+    emitRuntimeEvent('sunbrowser-update-changed', event);
+    if (event.action === 'publish' || event.status === 'published') {
+      void ensurePublishedSunbrowserUpdates({ force: true }).catch(() => null);
+    }
+  }
+}
+
+async function consumeCatalogEventStream(signal) {
+  const response = await fetch(`${PORTAL_URL}/api/agent/catalog-events?revision=${encodeURIComponent(currentCatalogRevision())}`, {
+    method: 'GET',
+    headers: state.agentToken ? { 'X-Agent-Token': state.agentToken } : {},
+    signal
+  });
+  if (!response.ok || !response.body) {
+    const payload = await response.json().catch(() => ({}));
+    const error = new Error(payload.error || `Canal de catálogo retornou HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let eventName = 'message';
+  let dataLines = [];
+  const dispatch = () => {
+    if (!dataLines.length) return;
+    try {
+      const payload = JSON.parse(dataLines.join('\n'));
+      if (eventName === 'catalog-version' || eventName === 'catalog-changed') scheduleCatalogRefresh(payload);
+      if (eventName === 'agent-data-changed') handleAgentDataEvent(payload);
+    } catch {
+      // Ignora um evento malformado sem encerrar o canal persistente.
+    }
+    eventName = 'message';
+    dataLines = [];
+  };
+  while (!signal.aborted) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, newlineIndex).replace(/\r$/, '');
+      buffer = buffer.slice(newlineIndex + 1);
+      if (!line) dispatch();
+      else if (line.startsWith('event:')) eventName = line.slice(6).trim() || 'message';
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+    }
+  }
+  dispatch();
+}
+
+async function runCatalogEventStream() {
+  if (catalogEventStreamRunning) return;
+  catalogEventStreamRunning = true;
+  let retryMs = 2000;
+  while (catalogEventStreamRunning) {
+    if (!state.agentToken || !state.user) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      continue;
+    }
+    const controller = new AbortController();
+    catalogEventStreamController = controller;
+    try {
+      await consumeCatalogEventStream(controller.signal);
+      retryMs = 2000;
+    } catch (error) {
+      if (!controller.signal.aborted && isInvalidAgentSession(error) && state.user) {
+        try { await refreshCustomerSession(); } catch {}
+      }
+    } finally {
+      if (catalogEventStreamController === controller) catalogEventStreamController = null;
+    }
+    if (catalogEventStreamRunning) {
+      await new Promise((resolve) => setTimeout(resolve, retryMs));
+      retryMs = Math.min(30000, Math.round(retryMs * 1.7));
+    }
+  }
 }
 
 async function listAdminProfiles() {
@@ -2715,6 +3236,35 @@ async function reportExtensionSessionStatus(body = {}) {
   });
 }
 
+async function getExtensionConfig(body = {}) {
+  await ensureMachineAuthenticated();
+  state.machine = buildMachineInfo();
+  return portalRequestWithSessionRefresh('/api/agent/extension/config', {
+    method: 'POST',
+    body: JSON.stringify({
+      extensionInstanceId: body.extensionInstanceId,
+      extensionVersion: body.extensionVersion,
+      url: body.url,
+      machineFingerprint: state.machine.fingerprint,
+      machineInfo: state.machine,
+    })
+  });
+}
+
+async function reportExtensionAccess(body = {}) {
+  await ensureMachineAuthenticated();
+  state.machine = buildMachineInfo();
+  return portalRequestWithSessionRefresh('/api/agent/extension/access-log', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...body,
+      machineFingerprint: state.machine.fingerprint,
+      machineName: state.machine.hostname || state.machine.osUser,
+      machineInfo: state.machine,
+    })
+  });
+}
+
 async function route(req, res) {
   if (req.method === 'OPTIONS') return json(res, 204, {});
 
@@ -2744,7 +3294,19 @@ async function route(req, res) {
       state.machine = buildMachineInfo();
       let accessIssue = null;
       let heartbeatResult = null;
-      if (state.agentToken && state.user) {
+      if (!state.agentToken && (state.rememberedEmail || state.user?.email)) {
+        try {
+          await ensureMachineAuthenticated();
+        } catch (error) {
+          accessIssue = {
+            status: error.status || 500,
+            code: error.payload?.code || 'agent_session_recovery_error',
+            message: error.message || 'Não foi possível restaurar a sessão deste dispositivo.',
+            supportTarget: error.payload?.supportTarget || 'suporte'
+          };
+        }
+      }
+      if (!accessIssue && state.agentToken && state.user) {
         try { heartbeatResult = await heartbeat(); } catch (error) {
           accessIssue = {
             status: error.status || 500,
@@ -2780,7 +3342,16 @@ async function route(req, res) {
     }
 
     if (req.method === 'GET' && url.pathname === '/profiles') {
-      return json(res, 200, await listProfiles());
+      return json(res, 200, await listProfiles({ forceRefresh: url.searchParams.get('refresh') === '1' }));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/intro-video.mp4') {
+      const videoPath = path.join(__dirname, '..', 'public', 'video intro painel-.mp4');
+      if (fs.existsSync(videoPath)) {
+        const stat = fs.statSync(videoPath);
+        res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': stat.size, 'Cache-Control': 'public, max-age=86400' });
+        return fs.createReadStream(videoPath).pipe(res);
+      }
     }
 
     if (req.method === 'GET' && url.pathname === '/updates/latest') {
@@ -2793,6 +3364,43 @@ async function route(req, res) {
         result.update.downloadUrl = `${url.origin}/updates/${encodeURIComponent(result.update.id)}/download`;
       }
       return json(res, 200, result);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/electron-updates/latest.yml') {
+      await ensureMachineAuthenticated();
+      const result = await portalRequestWithSessionRefresh(
+        `/api/agent/updates/latest?version=${encodeURIComponent(APP_VERSION)}&platform=win32&arch=${encodeURIComponent(process.arch)}`,
+        { method: 'GET' }
+      );
+      const update = result.updateAvailable ? result.update : null;
+      if (!update || !/^\d+\.\d+\.\d+$/.test(String(update.version || '')) || !String(update.sha512 || '').trim()) {
+        return json(res, 404, { error: 'Nenhuma atualizacao oficial disponivel' });
+      }
+      const fileName = `NinjaFlixPainelSetup-${update.version}.exe`;
+      const relativeUrl = `${encodeURIComponent(update.id)}/${encodeURIComponent(fileName)}`;
+      const quoteYaml = (value) => JSON.stringify(String(value ?? ''));
+      const metadata = [
+        `version: ${quoteYaml(update.version)}`,
+        'files:',
+        `  - url: ${quoteYaml(relativeUrl)}`,
+        `    sha512: ${quoteYaml(update.sha512)}`,
+        `    size: ${Number(update.sizeBytes || 0)}`,
+        `path: ${quoteYaml(relativeUrl)}`,
+        `sha512: ${quoteYaml(update.sha512)}`,
+        `releaseDate: ${quoteYaml(update.publishedAt || update.updatedAt || update.createdAt || new Date().toISOString())}`,
+        ''
+      ].join('\n');
+      res.writeHead(200, {
+        'Content-Type': 'text/yaml; charset=utf-8',
+        'Content-Length': Buffer.byteLength(metadata),
+        'Cache-Control': 'no-store'
+      });
+      return res.end(metadata);
+    }
+
+    const electronUpdateDownloadMatch = url.pathname.match(/^\/electron-updates\/([^/]+)\/[^/]+\.exe$/i);
+    if (req.method === 'GET' && electronUpdateDownloadMatch) {
+      return proxyUpdateDownload(req, res, decodeURIComponent(electronUpdateDownloadMatch[1]));
     }
 
     const updateDownloadMatch = url.pathname.match(/^\/updates\/([^/]+)\/download$/);
@@ -2829,6 +3437,13 @@ async function route(req, res) {
       return json(res, 201, await portalRequestWithSessionRefresh('/api/agent/support-tickets', { method: 'POST', body: JSON.stringify(body) }));
     }
 
+    const supportMessageMatch = url.pathname.match(/^\/support-tickets\/([^/]+)\/messages$/);
+    if (req.method === 'POST' && supportMessageMatch) {
+      const body = await readBody(req);
+      await ensureMachineAuthenticated();
+      return json(res, 200, await portalRequestWithSessionRefresh(`/api/agent/support-tickets/${encodeURIComponent(supportMessageMatch[1])}/messages`, { method: 'POST', body: JSON.stringify(body) }));
+    }
+
     if (req.method === 'POST' && url.pathname === '/launch-link') {
       const body = await readBody(req);
       await ensureMachineAuthenticated();
@@ -2841,6 +3456,12 @@ async function route(req, res) {
 
     if (req.method === 'GET' && url.pathname === '/admin/adspower/profiles') {
       return json(res, 200, await listLocalAdspowerProfiles({ forceRefresh: url.searchParams.get('refresh') === '1' }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/sunbrowser-bootstrap') {
+      await ensureMachineAuthenticated();
+      const body = await readBody(req).catch(() => ({}));
+      return json(res, 200, await ensurePublishedSunbrowserUpdates({ force: Boolean(body.force) }));
     }
 
     if (req.method === 'GET' && url.pathname === '/admin/adspower/bootstrap-status') {
@@ -2858,10 +3479,12 @@ async function route(req, res) {
     if (req.method === 'POST' && url.pathname === '/login') return json(res, 200, await login(body));
     if (req.method === 'POST' && url.pathname === '/customer-login') return json(res, 200, await customerLogin(body));
     if (req.method === 'POST' && url.pathname === '/logout') return json(res, 200, logout());
-    if (req.method === 'POST' && url.pathname === '/heartbeat') return json(res, 200, await heartbeat());
+    if (req.method === 'POST' && url.pathname === '/heartbeat') return json(res, 200, await heartbeat({ force: true }));
     if (req.method === 'POST' && url.pathname === '/extension/session/start') return json(res, 200, await startExtensionSession(body));
     if (req.method === 'POST' && url.pathname === '/extension/heartbeat') return json(res, 200, await extensionHeartbeat(body));
     if (req.method === 'POST' && url.pathname === '/extension/session-status') return json(res, 200, await reportExtensionSessionStatus(body));
+    if (req.method === 'POST' && url.pathname === '/extension/config') return json(res, 200, await getExtensionConfig(body));
+    if (req.method === 'POST' && url.pathname === '/extension/access-log') return json(res, 201, await reportExtensionAccess(body));
     if (req.method === 'POST' && url.pathname === '/kernel-plan') return json(res, 200, buildKernelPlan());
     if (req.method === 'POST' && url.pathname === '/open') return json(res, 200, await handleOpen(body));
     if (req.method === 'POST' && url.pathname === '/close') return json(res, 200, await handleClose(body));
@@ -2889,6 +3512,7 @@ if (process.env.NODE_ENV !== 'test') {
     console.log(`Ninjaflix Painel ${APP_VERSION} local em http://${HOST}:${PORT}`);
     console.log(`Portal central configurado: ${PORTAL_URL}`);
     console.log(`Maquina: ${state.machine.hostname} (${state.machine.fingerprint.slice(0, 12)})`);
+    void runCatalogEventStream();
   });
 }
 
