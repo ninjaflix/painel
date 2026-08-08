@@ -59,6 +59,48 @@ notarize() {
   fi
 }
 
+adhoc_sign_app() {
+  local app_path="$1"
+  local entitlements="$ROOT/build/entitlements.mac.plist"
+
+  echo "Limpando metadados e assinaturas inconsistentes do Painel..."
+  xattr -cr "$app_path" 2>/dev/null || true
+  find "$app_path" -type d -name _CodeSignature -prune -exec rm -rf {} +
+  find "$app_path" -type f -name CodeResources -delete
+
+  echo "Aplicando assinatura ad hoc nos componentes internos..."
+  while IFS= read -r item; do
+    codesign --force --sign - --timestamp=none "$item"
+  done < <(
+    find "$app_path/Contents" -type f -print0 |
+      xargs -0 file |
+      awk -F: '/Mach-O/ {print $1}' |
+      awk '{ print length($0), $0 }' |
+      sort -rn |
+      cut -d' ' -f2-
+  )
+
+  while IFS= read -r bundle; do
+    codesign --force --sign - --timestamp=none "$bundle"
+  done < <(
+    find "$app_path/Contents" -depth -type d \
+      \( -name '*.framework' -o -name '*.app' -o -name '*.xpc' -o -name '*.appex' \) \
+      ! -path "$app_path" -print
+  )
+
+  codesign --force --sign - --timestamp=none --options runtime \
+    --entitlements "$entitlements" "$app_path"
+  codesign --verify --deep --strict --verbose=4 "$app_path"
+
+  local signature_type
+  signature_type="$(codesign -dv --verbose=4 "$app_path" 2>&1 || true)"
+  grep -q 'Signature=adhoc' <<< "$signature_type" || {
+    echo "O Painel nao terminou com uma assinatura ad hoc integra." >&2
+    printf '%s\n' "$signature_type" >&2
+    exit 1
+  }
+}
+
 create_icon() {
   local source="$ROOT/build/logo-roxo-1024.png"
   local iconset="$OUTPUT_ROOT/Ninjaflix.iconset"
@@ -166,7 +208,9 @@ build_arch() {
   app_path="$(find_app "$output")"
   [[ -n "$app_path" ]] || { echo "Aplicativo gerado não encontrado em $output." >&2; exit 1; }
 
-  if [[ "$ALLOW_UNSIGNED" != "1" ]]; then
+  if [[ "$ALLOW_UNSIGNED" == "1" ]]; then
+    adhoc_sign_app "$app_path"
+  else
     codesign --verify --deep --strict --verbose=2 "$app_path"
     ditto -c -k --sequesterRsrc --keepParent "$app_path" "$stage/notarize-app.zip"
     notarize "$stage/notarize-app.zip"

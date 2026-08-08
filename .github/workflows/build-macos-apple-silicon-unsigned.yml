@@ -5,6 +5,8 @@ on:
   push:
     paths:
       - ".github/workflows/build-macos-apple-silicon-unsigned.yml"
+      - "scripts/build-macos.sh"
+      - "scripts/test-macos-unsigned-installer.sh"
 
 permissions:
   contents: write
@@ -41,6 +43,17 @@ jobs:
       - name: Compilar macOS Apple Silicon
         run: npm run build:mac:apple
 
+      - name: Testar instalacao, assinatura interna e Gatekeeper
+        env:
+          EXPECTED_ARCH: arm64
+          EXPECTED_VERSION: 2.0.1
+        run: |
+          chmod +x scripts/test-macos-unsigned-installer.sh
+          scripts/test-macos-unsigned-installer.sh \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/NinjaFlixCompletoSetup-2.0.1-mac-arm64.pkg \
+            ARQUIVOS-GERADOS/RELATORIOS/APPLE-SILICON-ADHOC
+          cat ARQUIVOS-GERADOS/RELATORIOS/APPLE-SILICON-ADHOC/RELATORIO-TESTE-MAC-APPLE-SILICON-2.0.1-ADHOC.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Mostrar arquivos gerados
         run: |
           find ARQUIVOS-GERADOS -maxdepth 6 -type f -print
@@ -58,4 +71,13 @@ jobs:
             ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-arm64.zip \
             ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-arm64.pkg \
             ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-arm64.txt \
+            ARQUIVOS-GERADOS/RELATORIOS/APPLE-SILICON-ADHOC/*.md \
             --clobber
+
+      - name: Anexar diagnosticos do teste
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostico-apple-silicon-adhoc-2.0.1
+          path: ARQUIVOS-GERADOS/RELATORIOS/APPLE-SILICON-ADHOC
+          retention-days: 30
