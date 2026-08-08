@@ -93,6 +93,13 @@ fi
 
 pkill -if 'Ninjaflix|local-agent|AdsPower' 2>/dev/null || true
 
+# Os binarios temporarios servem apenas para os testes de quarentena e estrutura.
+# Mantemos no artefato somente os resultados textuais e o relatorio final.
+rm -rf \
+  "$REPORT_DIR/quarantined.pkg" \
+  "$REPORT_DIR/expanded" \
+  "$REPORT_DIR/Ninjaflix Painel-quarantine.app"
+
 REPORT="$REPORT_DIR/RELATORIO-TESTE-MAC-APPLE-SILICON-${EXPECTED_VERSION}-ADHOC.md"
 {
   echo "# Relatorio de teste do instalador NinjaFlix ${EXPECTED_VERSION} - Apple Silicon ad hoc"
