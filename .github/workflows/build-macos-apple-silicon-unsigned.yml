@@ -7,7 +7,7 @@ on:
       - ".github/workflows/build-macos-apple-silicon-unsigned.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -46,14 +46,16 @@ jobs:
           find ARQUIVOS-GERADOS -maxdepth 6 -type f -print
           du -sh ARQUIVOS-GERADOS
 
-      - name: Disponibilizar arquivos para download
-        uses: actions/upload-artifact@v4
-        with:
-          name: NinjaFlix-macOS-Apple-Silicon-2.0.1-${{ github.run_number }}
-          path: |
-            ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-arm64.zip
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-arm64.pkg
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-arm64.txt
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
+      - name: Disponibilizar arquivos para download temporario
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-2.0.1-temp"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.1" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
+            gh release view "$TAG" >/dev/null
+          gh release upload "$TAG" \
+            ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-arm64.zip \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-arm64.pkg \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/*-arm64.txt \
+            --clobber

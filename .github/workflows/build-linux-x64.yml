@@ -14,7 +14,7 @@ on:
       - "package-lock.json"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -55,57 +55,16 @@ jobs:
           file ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/LINUX/NinjaFlixPainelUpdate-2.0.1-linux-x64.AppImage
           tar -tzf ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/NinjaFlixCompletoSetup-2.0.1-linux-x64.tar.gz
 
-      - name: Preparar partes do instalador completo
+      - name: Disponibilizar arquivos para download temporario
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p "$RUNNER_TEMP/ninjaflix-linux-parts"
-          split -b 180m \
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/NinjaFlixCompletoSetup-2.0.1-linux-x64.tar.gz \
-            "$RUNNER_TEMP/ninjaflix-linux-parts/NinjaFlixCompletoSetup-2.0.1-linux-x64.tar.gz.part-"
-          test -f "$RUNNER_TEMP/ninjaflix-linux-parts/NinjaFlixCompletoSetup-2.0.1-linux-x64.tar.gz.part-aa"
-
-      - name: Disponibilizar atualizacao e checksum
-        uses: actions/upload-artifact@v4
-        with:
-          name: NinjaFlix-Linux-x64-2.0.1-update-${{ github.run_number }}
-          path: |
-            ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/LINUX/*.AppImage
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/*.txt
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
-      - name: Disponibilizar instalador parte AA
-        uses: actions/upload-artifact@v4
-        with:
-          name: NinjaFlix-Linux-x64-2.0.1-completo-part-aa-${{ github.run_number }}
-          path: ${{ runner.temp }}/ninjaflix-linux-parts/*.part-aa
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
-      - name: Disponibilizar instalador parte AB
-        uses: actions/upload-artifact@v4
-        with:
-          name: NinjaFlix-Linux-x64-2.0.1-completo-part-ab-${{ github.run_number }}
-          path: ${{ runner.temp }}/ninjaflix-linux-parts/*.part-ab
-          if-no-files-found: ignore
-          compression-level: 0
-          retention-days: 7
-
-      - name: Disponibilizar instalador parte AC
-        uses: actions/upload-artifact@v4
-        with:
-          name: NinjaFlix-Linux-x64-2.0.1-completo-part-ac-${{ github.run_number }}
-          path: ${{ runner.temp }}/ninjaflix-linux-parts/*.part-ac
-          if-no-files-found: ignore
-          compression-level: 0
-          retention-days: 7
-
-      - name: Disponibilizar instalador parte AD
-        uses: actions/upload-artifact@v4
-        with:
-          name: NinjaFlix-Linux-x64-2.0.1-completo-part-ad-${{ github.run_number }}
-          path: ${{ runner.temp }}/ninjaflix-linux-parts/*.part-ad
-          if-no-files-found: ignore
-          compression-level: 0
-          retention-days: 7
+          TAG="build-2.0.1-temp"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.1" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
+            gh release view "$TAG" >/dev/null
+          gh release upload "$TAG" \
+            ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/LINUX/*.AppImage \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/*.tar.gz \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/*.txt \
+            --clobber
