@@ -47,6 +47,8 @@ jobs:
         env:
           EXPECTED_ARCH: arm64
           EXPECTED_VERSION: 2.0.1
+          REPORT_SLUG: MAC-APPLE-SILICON
+          REPORT_TITLE: Apple Silicon
         run: |
           chmod +x scripts/test-macos-unsigned-installer.sh
           scripts/test-macos-unsigned-installer.sh \

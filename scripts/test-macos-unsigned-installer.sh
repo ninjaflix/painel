@@ -5,6 +5,8 @@ PKG_PATH="${1:?Uso: $0 caminho.pkg diretorio-relatorio}"
 REPORT_DIR="${2:?Uso: $0 caminho.pkg diretorio-relatorio}"
 EXPECTED_ARCH="${EXPECTED_ARCH:-arm64}"
 EXPECTED_VERSION="${EXPECTED_VERSION:-2.0.1}"
+REPORT_SLUG="${REPORT_SLUG:-MAC-APPLE-SILICON}"
+REPORT_TITLE="${REPORT_TITLE:-Apple Silicon}"
 
 mkdir -p "$REPORT_DIR"
 PKG_PATH="$(cd "$(dirname "$PKG_PATH")" && pwd)/$(basename "$PKG_PATH")"
@@ -100,9 +102,9 @@ rm -rf \
   "$REPORT_DIR/expanded" \
   "$REPORT_DIR/Ninjaflix Painel-quarantine.app"
 
-REPORT="$REPORT_DIR/RELATORIO-TESTE-MAC-APPLE-SILICON-${EXPECTED_VERSION}-ADHOC.md"
+REPORT="$REPORT_DIR/RELATORIO-TESTE-${REPORT_SLUG}-${EXPECTED_VERSION}-ADHOC.md"
 {
-  echo "# Relatorio de teste do instalador NinjaFlix ${EXPECTED_VERSION} - Apple Silicon ad hoc"
+  echo "# Relatorio de teste do instalador NinjaFlix ${EXPECTED_VERSION} - ${REPORT_TITLE} ad hoc"
   echo
   echo "## Ambiente"
   echo '```text'
