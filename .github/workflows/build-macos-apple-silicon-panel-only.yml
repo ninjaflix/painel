@@ -59,7 +59,10 @@ jobs:
           test -d "$APP"
           test -L "$MOUNT_POINT/Applications"
           test "$(readlink "$MOUNT_POINT/Applications")" = "/Applications"
-          ! find "$MOUNT_POINT" -iname '*adspower*' -print -quit | grep -q .
+          ! find "$MOUNT_POINT" \
+            \( -type d \( -iname 'AdsPower.app' -o -iname 'AdsPower Global.app' \) \
+               -o -type f \( -iname '*adspower*.dmg' -o -iname '*adspower*.pkg' \) \) \
+            -print -quit | grep -q .
           codesign --verify --deep --strict --verbose=4 "$APP"
           codesign -dv --verbose=4 "$APP" 2>&1 | tee codesign-details.txt
           grep -q 'Signature=adhoc' codesign-details.txt

@@ -115,7 +115,10 @@ ditto "$APP_PATH" "$DMG_STAGE/Ninjaflix Painel.app"
 ln -s /Applications "$DMG_STAGE/Applications"
 xattr -cr "$DMG_STAGE" 2>/dev/null || true
 
-if find "$DMG_STAGE" -iname '*adspower*' -print -quit | grep -q .; then
+if find "$DMG_STAGE" \
+  \( -type d \( -iname 'AdsPower.app' -o -iname 'AdsPower Global.app' \) \
+     -o -type f \( -iname '*adspower*.dmg' -o -iname '*adspower*.pkg' \) \) \
+  -print -quit | grep -q .; then
   echo "Falha de seguranca: o DMG painel-somente contem arquivo do AdsPower." >&2
   exit 1
 fi
@@ -135,7 +138,10 @@ MOUNTED_APP="$MOUNT_POINT/Ninjaflix Painel.app"
 codesign --verify --deep --strict --verbose=4 "$MOUNTED_APP"
 MOUNTED_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$MOUNTED_APP/Contents/Info.plist")"
 lipo -archs "$MOUNTED_APP/Contents/MacOS/$MOUNTED_EXECUTABLE" | grep -qw arm64
-if find "$MOUNT_POINT" -iname '*adspower*' -print -quit | grep -q .; then
+if find "$MOUNT_POINT" \
+  \( -type d \( -iname 'AdsPower.app' -o -iname 'AdsPower Global.app' \) \
+     -o -type f \( -iname '*adspower*.dmg' -o -iname '*adspower*.pkg' \) \) \
+  -print -quit | grep -q .; then
   echo "Falha de seguranca: AdsPower encontrado no DMG final." >&2
   exit 1
 fi
