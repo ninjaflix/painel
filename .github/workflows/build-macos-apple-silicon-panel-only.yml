@@ -20,7 +20,7 @@ permissions:
 jobs:
   build:
     name: DMG painel-somente Apple Silicon
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
@@ -30,6 +30,7 @@ jobs:
       - name: Confirmar Apple Silicon e versao
         run: |
           test "$(uname -m)" = "arm64"
+          sw_vers
           node -p "require('./package.json').version" | grep -qx "2.0.1"
 
       - name: Preparar Node.js
@@ -66,6 +67,8 @@ jobs:
           codesign --verify --deep --strict --verbose=4 "$APP"
           codesign -dv --verbose=4 "$APP" 2>&1 | tee codesign-details.txt
           grep -q 'Signature=adhoc' codesign-details.txt
+          codesign -d --entitlements :- "$APP" > signed-entitlements.plist 2>/dev/null
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.disable-library-validation' signed-entitlements.plist | grep -qx true
           EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
           lipo -archs "$APP/Contents/MacOS/$EXECUTABLE_NAME" | grep -qw arm64
 
@@ -96,6 +99,7 @@ jobs:
             echo "- Compilado em runner macOS Apple Silicon limpo."
             echo "- DMG sem AdsPower e sem scripts de instalacao."
             echo "- Aplicativo interno com assinatura ad hoc integra e hardened runtime."
+            echo "- Library validation desativada no processo principal para permitir o Electron Framework ad hoc no macOS 26."
             echo "- Arquitetura principal ARM64 validada."
             echo "- Processo do painel observado apos a abertura no runner."
             echo "- Gatekeeper continua sem confianca oficial por ausencia de Developer ID e notarizacao."

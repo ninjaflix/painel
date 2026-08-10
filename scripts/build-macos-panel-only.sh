@@ -75,6 +75,13 @@ adhoc_sign_app() {
     --entitlements "$ENTITLEMENTS" "$app_path"
   codesign --verify --deep --strict --verbose=4 "$app_path"
 
+  local signed_entitlements="$OUTPUT_ROOT/signed-app-entitlements.plist"
+  codesign -d --entitlements :- "$app_path" > "$signed_entitlements" 2>/dev/null
+  /usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.disable-library-validation' "$signed_entitlements" | grep -qx true || {
+    echo "O aplicativo final perdeu disable-library-validation; ele falharia ao carregar o Electron Framework no macOS 26." >&2
+    exit 1
+  }
+
   codesign -dv --verbose=4 "$app_path" 2>&1 | grep -q 'Signature=adhoc' || {
     echo "O aplicativo nao terminou com assinatura ad hoc integra." >&2
     exit 1
@@ -149,6 +156,9 @@ trap '[[ -z "${MOUNT_POINT:-}" ]] || hdiutil detach "$MOUNT_POINT" -force >/dev/
 MOUNTED_APP="$MOUNT_POINT/Ninjaflix Painel.app"
 [[ -d "$MOUNTED_APP" ]] || { echo "O aplicativo nao foi encontrado dentro do DMG." >&2; exit 1; }
 codesign --verify --deep --strict --verbose=4 "$MOUNTED_APP"
+MOUNTED_ENTITLEMENTS="$OUTPUT_ROOT/mounted-app-entitlements.plist"
+codesign -d --entitlements :- "$MOUNTED_APP" > "$MOUNTED_ENTITLEMENTS" 2>/dev/null
+/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.disable-library-validation' "$MOUNTED_ENTITLEMENTS" | grep -qx true
 MOUNTED_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$MOUNTED_APP/Contents/Info.plist")"
 lipo -archs "$MOUNTED_APP/Contents/MacOS/$MOUNTED_EXECUTABLE" | grep -qw arm64
 if find "$MOUNT_POINT" \
