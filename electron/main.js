@@ -363,7 +363,7 @@ function ensureRuntimeFiles() {
       fs.writeFileSync(envPath, [
         'AGENT_HOST=127.0.0.1',
         `AGENT_PORT=${AGENT_PORT}`,
-        'PORTAL_URL=https://agente-admin.187.77.55.247.nip.io',
+        'PORTAL_URL=https://painel.ninjaflix.club',
         `ADSPOWER_BASE_URL=${ADSPOWER_BASE_URL}`,
         'AGENT_TOKEN=',
         'ADSPOWER_PROFILES_CACHE_TTL_MS=30000',
@@ -374,6 +374,7 @@ function ensureRuntimeFiles() {
 
   const envContents = fs.readFileSync(envPath, 'utf8');
   const forcedSettings = {
+    PORTAL_URL: 'https://painel.ninjaflix.club',
     ADSPOWER_BASE_URL,
     ADSPOWER_DISABLE_PASSWORD_FILLING,
     ADSPOWER_ENABLE_PASSWORD_SAVING

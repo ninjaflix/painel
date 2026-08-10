@@ -20,7 +20,7 @@ const {
 
 const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const PORT = Number(process.env.AGENT_PORT || 3101);
-const APP_VERSION = process.env.AGENT_VERSION || process.env.npm_package_version || '2.0.1';
+const APP_VERSION = process.env.AGENT_VERSION || process.env.npm_package_version || '2.0.2';
 const ADSPOWER_API_PORT = '50326';
 function normalizePortalUrl(value) {
   const raw = String(value || `http://127.0.0.1:${config.port}`).replace(/\/$/, '');

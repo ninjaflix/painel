@@ -1,6 +1,6 @@
 {
   "name": "ninjaflix-agent-cliente",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Agente local NinjaFlix para vincular mÃ¡quina por CPF, consultar perfis liberados e abrir perfis ADSPower.",
   "main": "scripts/local-agent.js",
   "bin": "scripts/local-agent.js",
@@ -67,7 +67,7 @@
           ]
         }
       ],
-      "artifactName": "NinjaFlixPainelSetup-2.0.1.${ext}",
+      "artifactName": "NinjaFlixPainelSetup-2.0.2.${ext}",
       "publish": [
         {
           "provider": "generic",
@@ -104,7 +104,7 @@
           ]
         }
       ],
-      "artifactName": "NinjaFlixPainelUpdate-2.0.1-linux-x64.${ext}",
+      "artifactName": "NinjaFlixPainelUpdate-2.0.2-linux-x64.${ext}",
       "icon": "build/logo-roxo-1024.png",
       "executableName": "ninjaflix-painel",
       "desktop": {

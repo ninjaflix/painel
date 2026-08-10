@@ -4,7 +4,7 @@ set -euo pipefail
 PKG_PATH="${1:?Uso: $0 caminho.pkg diretorio-relatorio}"
 REPORT_DIR="${2:?Uso: $0 caminho.pkg diretorio-relatorio}"
 EXPECTED_ARCH="${EXPECTED_ARCH:-arm64}"
-EXPECTED_VERSION="${EXPECTED_VERSION:-2.0.1}"
+EXPECTED_VERSION="${EXPECTED_VERSION:-2.0.2}"
 REPORT_SLUG="${REPORT_SLUG:-MAC-APPLE-SILICON}"
 REPORT_TITLE="${REPORT_TITLE:-Apple Silicon}"
 

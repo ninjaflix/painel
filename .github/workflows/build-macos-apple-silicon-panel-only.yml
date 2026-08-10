@@ -31,7 +31,7 @@ jobs:
         run: |
           test "$(uname -m)" = "arm64"
           sw_vers
-          node -p "require('./package.json').version" | grep -qx "2.0.1"
+          node -p "require('./package.json').version" | grep -qx "2.0.2"
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -49,10 +49,10 @@ jobs:
 
       - name: Validar conteudo e comportamento do Gatekeeper
         run: |
-          DMG="ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE/NinjaFlixPainel-2.0.1-mac-arm64.dmg"
+          DMG="ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE/NinjaFlixPainel-2.0.2-mac-arm64.dmg"
           test -f "$DMG"
           hdiutil verify "$DMG"
-          shasum -a 256 -c ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE/SHA256-NinjaFlixPainel-2.0.1-mac-arm64.txt
+          shasum -a 256 -c ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE/SHA256-NinjaFlixPainel-2.0.2-mac-arm64.txt
 
           MOUNT_POINT="$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F '\t' '/\/Volumes\// {print $NF}' | tail -1)"
           trap 'hdiutil detach "$MOUNT_POINT" -force >/dev/null 2>&1 || true' EXIT
@@ -94,7 +94,7 @@ jobs:
           OUT="ARQUIVOS-GERADOS/RELATORIOS/MAC-APPLE-SILICON-PAINEL-SOMENTE"
           mkdir -p "$OUT"
           {
-            echo "# NinjaFlix Painel 2.0.1 - Apple Silicon - painel somente"
+            echo "# NinjaFlix Painel 2.0.2 - Apple Silicon - painel somente"
             echo
             echo "- Compilado em runner macOS Apple Silicon limpo."
             echo "- DMG sem AdsPower e sem scripts de instalacao."
@@ -124,16 +124,16 @@ jobs:
             cat panel-open.txt 2>/dev/null || true
             cat panel-processes.txt 2>/dev/null || true
             echo '```'
-          } > "$OUT/RELATORIO-NINJAFLIX-2.0.1-APPLE-SILICON-PAINEL-SOMENTE.md"
-          cat "$OUT/RELATORIO-NINJAFLIX-2.0.1-APPLE-SILICON-PAINEL-SOMENTE.md" >> "$GITHUB_STEP_SUMMARY"
+          } > "$OUT/RELATORIO-NINJAFLIX-2.0.2-APPLE-SILICON-PAINEL-SOMENTE.md"
+          cat "$OUT/RELATORIO-NINJAFLIX-2.0.2-APPLE-SILICON-PAINEL-SOMENTE.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Disponibilizar arquivo para download temporario
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="build-2.0.1-panel-only-temp"
+          TAG="build-2.0.2-panel-only-temp"
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "Painel macOS Apple Silicon 2.0.1" --notes "DMG experimental contendo somente o Painel NinjaFlix, sem AdsPower." --prerelease || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Painel macOS Apple Silicon 2.0.2" --notes "DMG experimental contendo somente o Painel NinjaFlix, sem AdsPower." --prerelease || \
             gh release view "$TAG" >/dev/null
           gh release upload "$TAG" \
             ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE/* \
@@ -144,7 +144,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ninjaflix-2.0.1-mac-arm64-painel-somente
+          name: ninjaflix-2.0.2-mac-arm64-painel-somente
           path: |
             ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE
             ARQUIVOS-GERADOS/RELATORIOS/MAC-APPLE-SILICON-PAINEL-SOMENTE

@@ -1,5 +1,17 @@
 # NinjaFlix Agent Cliente
 
+## Linha de versao 2.0
+
+- `2.0.0` e a versao de transicao manual para clientes instalados nas linhas `1.1.33` a `1.1.48`.
+- Atualizacao leve: `ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/NinjaFlixPainelSetup-2.0.0.exe`.
+- Instalacao completa com AdsPower: `ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/NinjaFlixCompletoSetup-2.0.0.exe`.
+- Depois da instalacao manual da `2.0.0`, as proximas versoes usam o atualizador oficial do Electron.
+- `2.0.2` migra o portal central do agente para `https://painel.ninjaflix.club`, inclusive nas instalacoes atualizadas sobre a 2.0.1.
+- `2.0.1` adiciona o aceite obrigatorio dos Termos de Uso e da Politica de Privacidade no instalador completo.
+- O instalador `2.0.1` tenta atualizar os documentos em `https://ativar.ninjaflix.club/api/public/legal/installer.txt`, salva uma copia local e mantem um fallback embutido para instalacoes offline.
+- Arquivos locais `2.0.1`: `NinjaFlixPainelSetup-2.0.1.exe` (painel) e `NinjaFlixCompletoSetup-2.0.1.exe` (painel + AdsPower).
+- Nunca confundir a atualizacao leve com o instalador completo para novos clientes.
+
 Repositório mínimo para gerar/instalar o agente local em uma máquina de cliente.
 
 O agente local roda em `http://127.0.0.1:3101`, autentica o cliente pelo CPF usado no checkout, vincula a máquina ao cliente no Gestão/agent-admin e lista somente os perfis ADSPower liberados no painel central.
@@ -7,7 +19,7 @@ O agente local roda em `http://127.0.0.1:3101`, autentica o cliente pelo CPF usa
 ## O que este pacote faz
 
 - Captura a máquina local e vincula ao CPF do cliente.
-- Consulta o portal central em `https://agente-admin.187.77.55.247.nip.io`.
+- Consulta o portal central em `https://painel.ninjaflix.club`.
 - Lista os perfis liberados no agente-admin.
 - Abre, fecha e consulta status dos perfis no ADSPower local.
 - Serve endpoints locais usados pela extensão em `http://127.0.0.1:3101`.
@@ -107,7 +119,7 @@ Configuração padrão recomendada:
 ```env
 AGENT_HOST=127.0.0.1
 AGENT_PORT=3101
-PORTAL_URL=https://agente-admin.187.77.55.247.nip.io
+PORTAL_URL=https://painel.ninjaflix.club
 ADSPOWER_BASE_URL=http://127.0.0.1:50326
 AGENT_TOKEN=
 ```
@@ -188,7 +200,7 @@ AGENTE-CLIENTE-INSTALADOR/
 Normalmente indica que o agente está apontando para um portal antigo ou HTTP. Confirme no log se aparece:
 
 ```text
-Portal central configurado: https://agente-admin.187.77.55.247.nip.io
+Portal central configurado: https://painel.ninjaflix.club
 ```
 
 ### `Token do agente inválido`
