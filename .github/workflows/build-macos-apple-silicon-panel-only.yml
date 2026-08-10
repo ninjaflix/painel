@@ -1,0 +1,132 @@
+name: Compilar painel macOS Apple Silicon sem AdsPower
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-macos-apple-silicon-panel-only.yml"
+      - "scripts/build-macos-panel-only.sh"
+      - "build/entitlements.mac.panel-only.plist"
+      - "electron/**"
+      - "scripts/local-agent.js"
+      - "src/**"
+      - "public/**"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: DMG painel-somente Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v6
+
+      - name: Confirmar Apple Silicon e versao
+        run: |
+          test "$(uname -m)" = "arm64"
+          node -p "require('./package.json').version" | grep -qx "2.0.1"
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar DMG painel-somente
+        run: |
+          chmod +x scripts/build-macos-panel-only.sh
+          scripts/build-macos-panel-only.sh arm64
+
+      - name: Validar conteudo e comportamento do Gatekeeper
+        run: |
+          DMG="ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE/NinjaFlixPainel-2.0.1-mac-arm64.dmg"
+          test -f "$DMG"
+          hdiutil verify "$DMG"
+          shasum -a 256 -c ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE/SHA256-NinjaFlixPainel-2.0.1-mac-arm64.txt
+
+          MOUNT_POINT="$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F '\t' '/\/Volumes\// {print $NF}' | tail -1)"
+          trap 'hdiutil detach "$MOUNT_POINT" -force >/dev/null 2>&1 || true' EXIT
+          APP="$MOUNT_POINT/Ninjaflix Painel.app"
+          test -d "$APP"
+          test -L "$MOUNT_POINT/Applications"
+          test "$(readlink "$MOUNT_POINT/Applications")" = "/Applications"
+          ! find "$MOUNT_POINT" -iname '*adspower*' -print -quit | grep -q .
+          codesign --verify --deep --strict --verbose=4 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | tee codesign-details.txt
+          grep -q 'Signature=adhoc' codesign-details.txt
+          EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
+          lipo -archs "$APP/Contents/MacOS/$EXECUTABLE_NAME" | grep -qw arm64
+
+          set +e
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG" > gatekeeper-dmg.txt 2>&1
+          DMG_GATEKEEPER_EXIT=$?
+          spctl --assess --type execute --verbose=4 "$APP" > gatekeeper-app.txt 2>&1
+          APP_GATEKEEPER_EXIT=$?
+          set -e
+          cat gatekeeper-dmg.txt
+          cat gatekeeper-app.txt
+          test "$DMG_GATEKEEPER_EXIT" -ne 0
+          test "$APP_GATEKEEPER_EXIT" -ne 0
+
+      - name: Criar relatorio da compilacao
+        if: always()
+        run: |
+          OUT="ARQUIVOS-GERADOS/RELATORIOS/MAC-APPLE-SILICON-PAINEL-SOMENTE"
+          mkdir -p "$OUT"
+          {
+            echo "# NinjaFlix Painel 2.0.1 - Apple Silicon - painel somente"
+            echo
+            echo "- Compilado em runner macOS Apple Silicon limpo."
+            echo "- DMG sem AdsPower e sem scripts de instalacao."
+            echo "- Aplicativo interno com assinatura ad hoc integra e hardened runtime."
+            echo "- Arquitetura principal ARM64 validada."
+            echo "- Gatekeeper continua sem confianca oficial por ausencia de Developer ID e notarizacao."
+            echo
+            echo "## Assinatura"
+            echo '```text'
+            cat codesign-details.txt 2>/dev/null || true
+            echo '```'
+            echo
+            echo "## Gatekeeper do DMG"
+            echo '```text'
+            cat gatekeeper-dmg.txt 2>/dev/null || true
+            echo '```'
+            echo
+            echo "## Gatekeeper do aplicativo"
+            echo '```text'
+            cat gatekeeper-app.txt 2>/dev/null || true
+            echo '```'
+          } > "$OUT/RELATORIO-NINJAFLIX-2.0.1-APPLE-SILICON-PAINEL-SOMENTE.md"
+          cat "$OUT/RELATORIO-NINJAFLIX-2.0.1-APPLE-SILICON-PAINEL-SOMENTE.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Disponibilizar arquivo para download temporario
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-2.0.1-panel-only-temp"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Painel macOS Apple Silicon 2.0.1" --notes "DMG experimental contendo somente o Painel NinjaFlix, sem AdsPower." --prerelease || \
+            gh release view "$TAG" >/dev/null
+          gh release upload "$TAG" \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE/* \
+            ARQUIVOS-GERADOS/RELATORIOS/MAC-APPLE-SILICON-PAINEL-SOMENTE/*.md \
+            --clobber
+
+      - name: Anexar artefatos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ninjaflix-2.0.1-mac-arm64-painel-somente
+          path: |
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/PAINEL-SOMENTE
+            ARQUIVOS-GERADOS/RELATORIOS/MAC-APPLE-SILICON-PAINEL-SOMENTE
+          retention-days: 30
