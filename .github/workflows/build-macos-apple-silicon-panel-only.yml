@@ -69,6 +69,11 @@ jobs:
           EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
           lipo -archs "$APP/Contents/MacOS/$EXECUTABLE_NAME" | grep -qw arm64
 
+          open -na "$APP" > panel-open.txt 2>&1
+          sleep 10
+          pgrep -ifl 'Ninjaflix|Electron|local-agent' > panel-processes.txt
+          pkill -if 'Ninjaflix|local-agent' 2>/dev/null || true
+
           set +e
           spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG" > gatekeeper-dmg.txt 2>&1
           DMG_GATEKEEPER_EXIT=$?
@@ -92,6 +97,7 @@ jobs:
             echo "- DMG sem AdsPower e sem scripts de instalacao."
             echo "- Aplicativo interno com assinatura ad hoc integra e hardened runtime."
             echo "- Arquitetura principal ARM64 validada."
+            echo "- Processo do painel observado apos a abertura no runner."
             echo "- Gatekeeper continua sem confianca oficial por ausencia de Developer ID e notarizacao."
             echo
             echo "## Assinatura"
@@ -107,6 +113,12 @@ jobs:
             echo "## Gatekeeper do aplicativo"
             echo '```text'
             cat gatekeeper-app.txt 2>/dev/null || true
+            echo '```'
+            echo
+            echo "## Abertura do painel"
+            echo '```text'
+            cat panel-open.txt 2>/dev/null || true
+            cat panel-processes.txt 2>/dev/null || true
             echo '```'
           } > "$OUT/RELATORIO-NINJAFLIX-2.0.1-APPLE-SILICON-PAINEL-SOMENTE.md"
           cat "$OUT/RELATORIO-NINJAFLIX-2.0.1-APPLE-SILICON-PAINEL-SOMENTE.md" >> "$GITHUB_STEP_SUMMARY"
