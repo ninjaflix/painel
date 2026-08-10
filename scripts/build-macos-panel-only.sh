@@ -124,12 +124,25 @@ if find "$DMG_STAGE" \
 fi
 
 rm -f "$DMG_PATH" "$HASH_PATH"
-hdiutil create \
-  -volname "Ninjaflix Painel ${VERSION}" \
-  -srcfolder "$DMG_STAGE" \
-  -ov -format UDZO \
-  -imagekey zlib-level=9 \
-  "$DMG_PATH"
+DMG_CREATED=0
+for attempt in 1 2 3; do
+  if hdiutil create \
+    -volname "Ninjaflix Painel ${VERSION}" \
+    -srcfolder "$DMG_STAGE" \
+    -ov -format UDZO \
+    -imagekey zlib-level=9 \
+    "$DMG_PATH"; then
+    DMG_CREATED=1
+    break
+  fi
+  echo "hdiutil nao concluiu na tentativa ${attempt}; repetindo..." >&2
+  rm -f "$DMG_PATH"
+  sleep 5
+done
+[[ "$DMG_CREATED" == "1" ]] || {
+  echo "Nao foi possivel criar o DMG apos tres tentativas." >&2
+  exit 1
+}
 
 MOUNT_POINT="$(hdiutil attach -nobrowse -readonly "$DMG_PATH" | awk -F '\t' '/\/Volumes\// {print $NF}' | tail -1)"
 trap '[[ -z "${MOUNT_POINT:-}" ]] || hdiutil detach "$MOUNT_POINT" -force >/dev/null 2>&1 || true' EXIT
