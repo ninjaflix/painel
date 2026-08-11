@@ -1673,16 +1673,59 @@ async function installSunbrowserExecutable(installerPath) {
   });
 }
 
+function runExecutable(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout: 20 * 60 * 1000, maxBuffer: 2 * 1024 * 1024, ...options }, (error, stdout = '', stderr = '') => {
+      if (error) return reject(new Error(String(stderr || stdout || error.message).trim()));
+      resolve(String(stdout || '').trim());
+    });
+  });
+}
+
+async function linuxAdsPowerPackageInstalled(requiredVersion) {
+  if (process.platform !== 'linux') return false;
+  try {
+    const installed = await runExecutable('dpkg-query', ['-W', '-f=${Version}', 'adspower-global'], { timeout: 15000 });
+    await runExecutable('dpkg', ['--compare-versions', installed, 'ge', String(requiredVersion)], { timeout: 15000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function validateAndInstallLinuxAdsPower(installerPath, item) {
+  const packageName = await runExecutable('dpkg-deb', ['-f', installerPath, 'Package'], { timeout: 30000 });
+  const packageVersion = await runExecutable('dpkg-deb', ['-f', installerPath, 'Version'], { timeout: 30000 });
+  const packageArch = await runExecutable('dpkg-deb', ['-f', installerPath, 'Architecture'], { timeout: 30000 });
+  if (packageName !== 'adspower-global' || packageArch !== 'amd64') throw new Error('O pacote Linux do AdsPower/SunBrowser é inválido.');
+  if (packageVersion !== String(item.fullVersion || '')) throw new Error('A versão do pacote Linux não corresponde à versão publicada.');
+  await stopAdspowerProcesses();
+  try {
+    await runExecutable('pkexec', ['apt-get', 'install', '-y', installerPath]);
+  } catch (error) {
+    throw new Error(`A instalação Linux precisa da autorização do administrador. ${error.message}`.trim());
+  }
+  if (!(await linuxAdsPowerPackageInstalled(item.fullVersion))) throw new Error('Não foi possível confirmar a instalação do AdsPower/SunBrowser no Linux.');
+}
+
 async function ensurePublishedSunbrowserUpdates(options = {}) {
-  if (process.platform !== 'win32') return { ok: true, skipped: true, reason: 'platform', installed: [] };
+  if (!['win32', 'linux'].includes(process.platform)) return { ok: true, skipped: true, reason: 'platform', installed: [] };
   if (sunbrowserBootstrapInFlight) return sunbrowserBootstrapInFlight;
   const previousCheck = new Date(loadLocalState().sunbrowserLastCheckedAt || 0).getTime();
   if (!options.force && Number.isFinite(previousCheck) && Date.now() - previousCheck < 6 * 60 * 60 * 1000) {
     return { ok: true, alreadyChecked: true, installed: [], checkedAt: new Date(previousCheck).toISOString() };
   }
   sunbrowserBootstrapInFlight = (async () => {
-    const plan = await portalRequestWithSessionRefresh('/api/agent/sunbrowser-bootstrap', { method: 'GET' });
-    const updates = (Array.isArray(plan.updates) ? plan.updates : []).filter((item) => !kernelIsInstalled(item.kernelVersion, item.build));
+    const platform = process.platform === 'linux' ? 'linux' : 'windows';
+    const plan = await portalRequestWithSessionRefresh(`/api/agent/sunbrowser-bootstrap?platform=${platform}&arch=x64`, { method: 'GET' });
+    const candidates = Array.isArray(plan.updates) ? plan.updates : [];
+    const updates = [];
+    for (const item of candidates) {
+      const installed = process.platform === 'linux'
+        ? await linuxAdsPowerPackageInstalled(item.fullVersion)
+        : kernelIsInstalled(item.kernelVersion, item.build);
+      if (!installed) updates.push(item);
+    }
     if (!updates.length) {
       const checkedAt = new Date().toISOString();
       saveLocalState({ sunbrowserLastCheckedAt: checkedAt });
@@ -1696,14 +1739,16 @@ async function ensurePublishedSunbrowserUpdates(options = {}) {
     try {
       for (let index = 0; index < updates.length; index += 1) {
         const item = updates[index];
-        const installerPath = path.join(workRoot, `${item.id}.exe`);
+        const extension = process.platform === 'linux' ? '.deb' : '.exe';
+        const installerPath = path.join(workRoot, `${item.id}${extension}`);
         fs.rmSync(installerPath, { force: true });
         const startPercent = Math.round((index / updates.length) * 90);
-        emitRuntimeEvent('sunbrowser-bootstrap', { status: 'downloading', percent: Math.max(2, startPercent), message: `Baixando SunBrowser ${item.kernelVersion} (${index + 1} de ${updates.length})...`, experience: plan.experience || null });
+        emitRuntimeEvent('sunbrowser-bootstrap', { status: 'downloading', percent: Math.max(2, startPercent), message: `Baixando ${process.platform === 'linux' ? 'AdsPower/SunBrowser' : 'SunBrowser'} ${item.fullVersion || item.kernelVersion} (${index + 1} de ${updates.length})...`, experience: plan.experience || null });
         await downloadKernelPackage(item, installerPath);
         emitRuntimeEvent('sunbrowser-bootstrap', { status: 'installing', percent: Math.round(((index + 0.75) / updates.length) * 90), message: `Instalando SunBrowser ${item.kernelVersion}. Não feche o painel...`, experience: plan.experience || null });
-        await installSunbrowserExecutable(installerPath);
-        if (!kernelIsInstalled(item.kernelVersion, item.build)) throw new Error(`Não foi possível confirmar a instalação do SunBrowser ${item.kernelVersion}.`);
+        if (process.platform === 'linux') await validateAndInstallLinuxAdsPower(installerPath, item);
+        else await installSunbrowserExecutable(installerPath);
+        if (process.platform !== 'linux' && !kernelIsInstalled(item.kernelVersion, item.build)) throw new Error(`Não foi possível confirmar a instalação do SunBrowser ${item.kernelVersion}.`);
         installed.push({ id: item.id, kernelVersion: item.kernelVersion, build: item.build });
         fs.rmSync(installerPath, { force: true });
       }
@@ -1714,7 +1759,7 @@ async function ensurePublishedSunbrowserUpdates(options = {}) {
       emitRuntimeEvent('sunbrowser-bootstrap', { status: 'error', percent: null, message: error.message || 'Falha ao atualizar o SunBrowser.', experience: plan.experience || null });
       throw error;
     } finally {
-      for (const item of updates) fs.rmSync(path.join(workRoot, `${item.id}.exe`), { force: true });
+      for (const item of updates) fs.rmSync(path.join(workRoot, `${item.id}${process.platform === 'linux' ? '.deb' : '.exe'}`), { force: true });
     }
   })().finally(() => { sunbrowserBootstrapInFlight = null; });
   return sunbrowserBootstrapInFlight;

@@ -24,6 +24,7 @@ jobs:
 
     env:
       ADSPOWER_LINUX_X64_URL: "https://version.adspower.net/software/linux-x64-global/8.6.3/AdsPower-Global-8.6.3-x64.deb"
+      ADSPOWER_LINUX_X64_SHA256: "1ad4ffb5720bca1f9cc9c60023bdf754c2fb0812ce6f1834f5897e3907be9c63"
 
     steps:
       - name: Baixar codigo
@@ -32,7 +33,7 @@ jobs:
       - name: Confirmar arquitetura e versao
         run: |
           test "$(uname -m)" = "x86_64"
-          node -p "require('./package.json').version" | grep -qx "2.0.1"
+          node -p "require('./package.json').version" | grep -qx "2.0.2"
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -52,16 +53,16 @@ jobs:
       - name: Mostrar e validar arquivos gerados
         run: |
           find ARQUIVOS-GERADOS -maxdepth 6 -type f -print
-          file ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/LINUX/NinjaFlixPainelUpdate-2.0.1-linux-x64.AppImage
-          tar -tzf ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/NinjaFlixCompletoSetup-2.0.1-linux-x64.tar.gz
+          file ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/LINUX/NinjaFlixPainelUpdate-2.0.2-linux-x64.AppImage
+          tar -tzf ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/LINUX/NinjaFlixCompletoSetup-2.0.2-linux-x64.tar.gz
 
       - name: Disponibilizar arquivos para download temporario
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="build-2.0.1-temp"
+          TAG="build-2.0.2-temp"
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.1" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.2" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
             gh release view "$TAG" >/dev/null
           gh release upload "$TAG" \
             ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/LINUX/*.AppImage \

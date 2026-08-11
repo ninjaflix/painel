@@ -18,6 +18,7 @@ UPDATE_FILE="$UPDATE_DIR/NinjaFlixPainelUpdate-${VERSION}-linux-x64.AppImage"
 COMPLETE_FILE="$COMPLETE_DIR/NinjaFlixCompletoSetup-${VERSION}-linux-x64.tar.gz"
 CHECKSUM_FILE="$COMPLETE_DIR/SHA256-${VERSION}-linux-x64.txt"
 ADSPOWER_URL="${ADSPOWER_LINUX_X64_URL:-https://version.adspower.net/software/linux-x64-global/8.6.3/AdsPower-Global-8.6.3-x64.deb}"
+ADSPOWER_SHA256="${ADSPOWER_LINUX_X64_SHA256:-1ad4ffb5720bca1f9cc9c60023bdf754c2fb0812ce6f1834f5897e3907be9c63}"
 
 for command in node npm curl dpkg-deb sha256sum; do
   command -v "$command" >/dev/null || {
@@ -40,6 +41,9 @@ install -m 755 "$GENERATED_APPIMAGE" "$UPDATE_FILE"
 
 ADSPOWER_DEB="$BUILD_DIR/AdsPower-Global-8.6.3-x64.deb"
 curl --fail --location --retry 4 --retry-delay 3 --output "$ADSPOWER_DEB" "$ADSPOWER_URL"
+echo "$ADSPOWER_SHA256  $ADSPOWER_DEB" | sha256sum --check --strict
+test "$(dpkg-deb -f "$ADSPOWER_DEB" Package)" = "adspower-global"
+test "$(dpkg-deb -f "$ADSPOWER_DEB" Version)" = "8.6.3"
 test "$(dpkg-deb -f "$ADSPOWER_DEB" Architecture)" = "amd64"
 
 BUNDLE="$BUILD_DIR/NinjaFlixCompletoSetup-${VERSION}-linux-x64"
@@ -61,6 +65,10 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
 fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo "1ad4ffb5720bca1f9cc9c60023bdf754c2fb0812ce6f1834f5897e3907be9c63  $HERE/AdsPower-Global-8.6.3-x64.deb" | sha256sum --check --strict
+test "$(dpkg-deb -f "$HERE/AdsPower-Global-8.6.3-x64.deb" Package)" = "adspower-global"
+test "$(dpkg-deb -f "$HERE/AdsPower-Global-8.6.3-x64.deb" Version)" = "8.6.3"
+test "$(dpkg-deb -f "$HERE/AdsPower-Global-8.6.3-x64.deb" Architecture)" = "amd64"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 if apt-cache show libfuse2t64 >/dev/null 2>&1; then
