@@ -29,7 +29,7 @@ jobs:
       - name: Confirmar arquitetura e versao
         run: |
           test "$(uname -m)" = "x86_64"
-          node -p "require('./package.json').version" | grep -qx "2.0.1"
+          node -p "require('./package.json').version" | grep -qx "2.0.2"
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -46,15 +46,15 @@ jobs:
       - name: Testar instalacao, assinatura interna e Gatekeeper
         env:
           EXPECTED_ARCH: x86_64
-          EXPECTED_VERSION: 2.0.1
+          EXPECTED_VERSION: 2.0.2
           REPORT_SLUG: MAC-INTEL
           REPORT_TITLE: macOS Intel
         run: |
           chmod +x scripts/test-macos-unsigned-installer.sh
           scripts/test-macos-unsigned-installer.sh \
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/NinjaFlixCompletoSetup-2.0.1-mac-x64.pkg \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/NinjaFlixCompletoSetup-2.0.2-mac-x64.pkg \
             ARQUIVOS-GERADOS/RELATORIOS/MAC-INTEL-ADHOC
-          cat ARQUIVOS-GERADOS/RELATORIOS/MAC-INTEL-ADHOC/RELATORIO-TESTE-MAC-INTEL-2.0.1-ADHOC.md >> "$GITHUB_STEP_SUMMARY"
+          cat ARQUIVOS-GERADOS/RELATORIOS/MAC-INTEL-ADHOC/RELATORIO-TESTE-MAC-INTEL-2.0.2-ADHOC.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Mostrar arquivos gerados
         run: |
@@ -65,9 +65,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="build-2.0.1-temp"
+          TAG="build-2.0.2-temp"
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.1" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.2" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
             gh release view "$TAG" >/dev/null
           gh release upload "$TAG" \
             ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-x64.zip \
@@ -80,6 +80,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostico-mac-intel-adhoc-2.0.1
+          name: diagnostico-mac-intel-adhoc-2.0.2
           path: ARQUIVOS-GERADOS/RELATORIOS/MAC-INTEL-ADHOC
           retention-days: 30
