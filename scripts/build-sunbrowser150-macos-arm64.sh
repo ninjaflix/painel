@@ -43,6 +43,7 @@ hdiutil detach "$MOUNT" -quiet
 
 echo "Iniciando AdsPower pela Local API..."
 "$ADS_EXEC" --args --headless=true --api-key="$API_KEY" --api-port="$API_PORT" >"$WORK/adspower.log" 2>&1 &
+ADS_PID=$!
 for _ in $(seq 1 90); do
   if curl -fsS "http://127.0.0.1:$API_PORT/status" >"$WORK/api-status.json" 2>/dev/null; then break; fi
   sleep 2
@@ -82,26 +83,50 @@ ENCODED_PROFILE="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(
 curl -fsS "http://127.0.0.1:$API_PORT/api/v1/browser/start?user_id=$ENCODED_PROFILE&open_tabs=0" >"$WORK/browser-start.json" || true
 
 if grep -qi 'not ready.*download' "$WORK/browser-start.json"; then
-  echo "O AdsPower confirmou que o perfil usa o kernel 150, mas exige o download pelo gerenciador interno."
-  echo "Coletando somente referencias tecnicas do aplicativo para localizar o pacote oficial..."
-  DIAG="$WORK/kernel-discovery"
-  mkdir -p "$DIAG"
-  find "$ADS_APP/Contents/Resources" -maxdepth 3 -type f -print >"$DIAG/resources-files.txt" 2>/dev/null || true
-  ASAR_FILE="$(find "$ADS_APP/Contents/Resources" -maxdepth 2 -type f -name 'app.asar' -print -quit 2>/dev/null || true)"
-  if [[ -n "$ASAR_FILE" ]]; then
-    mkdir -p "$DIAG/app-asar"
-    npx --yes @electron/asar extract "$ASAR_FILE" "$DIAG/app-asar" >/dev/null 2>&1 || true
-    grep -RInaE --binary-files=without-match \
-      'version\.adspower|chrome_[0-9]+|SunBrowser[^[:space:]]{0,80}(download|update)|download[^[:space:]]{0,80}(kernel|browser)|kernel[^[:space:]]{0,80}(download|update)' \
-      "$DIAG/app-asar" >"$DIAG/source-matches.txt" 2>/dev/null || true
-    rm -rf "$DIAG/app-asar"
+  echo "O AdsPower confirmou que o perfil usa o kernel 150. Consultando o gerenciador oficial de kernels..."
+  META_OK=0
+  for API_BASE in https://api.adspower.net/ https://api-global.adspower.net/ https://api.adspower.com/; do
+    if curl -fsS --retry 2 --connect-timeout 15 --max-time 60 \
+      -H "api-key: $API_KEY" \
+      "${API_BASE}client/browser/get-browser-version?type=chrome&kernel=150&system=arm64&is_self_refresh=1" \
+      >"$WORK/kernel-150-meta.json"; then
+      if python3 - "$WORK/kernel-150-meta.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding='utf-8'))
+item = data.get('data') or {}
+raise SystemExit(0 if data.get('code') == 0 and item.get('download_url') and item.get('file_md5') and item.get('version') else 1)
+PY
+      then
+        META_OK=1
+        break
+      fi
+    fi
+  done
+  [[ "$META_OK" == 1 ]] || { echo "O gerenciador oficial nao retornou o pacote do kernel 150." >&2; exit 2; }
+
+  mapfile -t KERNEL_META < <(python3 - "$WORK/kernel-150-meta.json" <<'PY'
+import json, sys
+item = json.load(open(sys.argv[1], encoding='utf-8'))['data']
+print(item['download_url'])
+print(item['file_md5'].lower())
+print(str(item['version']))
+PY
+  )
+  KERNEL_URL="${KERNEL_META[0]}"
+  KERNEL_MD5="${KERNEL_META[1]}"
+  KERNEL_VERSION="${KERNEL_META[2]}"
+  KERNEL_ZIP="$WORK/sunbrowser-150-arm64.zip"
+  echo "Baixando o pacote oficial do SunBrowser 150..."
+  curl --fail --location --retry 4 --retry-delay 3 "$KERNEL_URL" -o "$KERNEL_ZIP"
+  ACTUAL_MD5="$(md5 -q "$KERNEL_ZIP" | tr '[:upper:]' '[:lower:]')"
+  [[ "$ACTUAL_MD5" == "$KERNEL_MD5" ]] || { echo "MD5 do pacote oficial nao confere." >&2; exit 2; }
+  mkdir -p "$KERNEL_DIR"
+  ditto -x -k "$KERNEL_ZIP" "$KERNEL_DIR"
+  printf '%s' "$KERNEL_VERSION" >"$KERNEL_DIR/update_version_key"
+  BROWSER_KEY="$(ps eww -p "$ADS_PID" 2>/dev/null | tr ' ' '\n' | sed -n 's/^SUNFLOWER_BROWSER_VERSION_150=//p' | head -n 1)"
+  if [[ -n "$BROWSER_KEY" ]]; then
+    printf '%s' "$BROWSER_KEY" >"$KERNEL_DIR/browser_key_150"
   fi
-  find "$HOME/Library/Application Support/adspower_global" -maxdepth 5 -type f -print >"$DIAG/local-files.txt" 2>/dev/null || true
-  grep -RInaE --binary-files=without-match \
-    'version\.adspower|chrome_150|SunBrowser 150|download[^[:space:]]{0,80}(kernel|browser)' \
-    "$HOME/Library/Application Support/adspower_global" >"$DIAG/local-matches.txt" 2>/dev/null || true
-  echo "O endpoint de abertura nao instala kernels. Consulte kernel-discovery no artefato do job." >&2
-  exit 2
 fi
 
 for _ in $(seq 1 180); do
