@@ -57,5 +57,6 @@ jobs:
             ${{ runner.temp }}/ninjaflix-sunbrowser150/api-status.json
             ${{ runner.temp }}/ninjaflix-sunbrowser150/browser-start.json
             ${{ runner.temp }}/ninjaflix-sunbrowser150/profile-list.json
+            ${{ runner.temp }}/ninjaflix-sunbrowser150/kernel-discovery
           if-no-files-found: warn
           retention-days: 7
