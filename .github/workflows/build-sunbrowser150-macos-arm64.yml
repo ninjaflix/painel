@@ -1,0 +1,61 @@
+name: Gerar instalador SunBrowser 150 macOS Apple Silicon
+
+on:
+  workflow_dispatch:
+    inputs:
+      adspower_profile_id:
+        description: ID de um perfil com SunBrowser 150 (vazio para detectar automaticamente)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Capturar kernel 150 e gerar PKG ARM64
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      ADSPOWER_API_KEY: ${{ secrets.ADSPOWER_API_KEY }}
+      ADSPOWER_PROFILE_ID: ${{ inputs.adspower_profile_id }}
+      ADSPOWER_API_PORT: "50326"
+      ADSPOWER_MAC_ARM64_URL: "https://version.adspower.net/software/darwin-arm64-global/8.6.3/AdsPower-Global-8.6.3-arm64.dmg"
+
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v6
+
+      - name: Validar configuracao segura
+        shell: bash
+        run: |
+          test "$(uname -m)" = arm64
+          test -n "$ADSPOWER_API_KEY"
+
+      - name: Instalar AdsPower, baixar kernel e gerar instalador
+        shell: bash
+        run: |
+          chmod +x scripts/build-sunbrowser150-macos-arm64.sh
+          scripts/build-sunbrowser150-macos-arm64.sh
+
+      - name: Validar pacote gerado
+        shell: bash
+        run: |
+          PKG='ARQUIVOS-GERADOS/3-INSTALADORES-AUXILIARES/SUNBROWSER-150-MAC-ARM64/NinjaFlixSunBrowser150Setup-mac-arm64.pkg'
+          test -s "$PKG"
+          pkgutil --check-signature "$PKG" || true
+          shasum -a 256 -c ARQUIVOS-GERADOS/3-INSTALADORES-AUXILIARES/SUNBROWSER-150-MAC-ARM64/SHA256-NinjaFlixSunBrowser150Setup-mac-arm64.txt
+
+      - name: Disponibilizar instalador e diagnosticos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NinjaFlix-SunBrowser150-macOS-arm64
+          path: |
+            ARQUIVOS-GERADOS/3-INSTALADORES-AUXILIARES/SUNBROWSER-150-MAC-ARM64
+            ${{ runner.temp }}/ninjaflix-sunbrowser150/adspower.log
+            ${{ runner.temp }}/ninjaflix-sunbrowser150/api-status.json
+            ${{ runner.temp }}/ninjaflix-sunbrowser150/browser-start.json
+            ${{ runner.temp }}/ninjaflix-sunbrowser150/profile-list.json
+          if-no-files-found: warn
+          retention-days: 7
