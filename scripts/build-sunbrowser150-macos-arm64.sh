@@ -104,17 +104,9 @@ PY
   done
   [[ "$META_OK" == 1 ]] || { echo "O gerenciador oficial nao retornou o pacote do kernel 150." >&2; exit 2; }
 
-  mapfile -t KERNEL_META < <(python3 - "$WORK/kernel-150-meta.json" <<'PY'
-import json, sys
-item = json.load(open(sys.argv[1], encoding='utf-8'))['data']
-print(item['download_url'])
-print(item['file_md5'].lower())
-print(str(item['version']))
-PY
-  )
-  KERNEL_URL="${KERNEL_META[0]}"
-  KERNEL_MD5="${KERNEL_META[1]}"
-  KERNEL_VERSION="${KERNEL_META[2]}"
+  KERNEL_URL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["data"]["download_url"])' "$WORK/kernel-150-meta.json")"
+  KERNEL_MD5="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["data"]["file_md5"].lower())' "$WORK/kernel-150-meta.json")"
+  KERNEL_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["data"]["version"])' "$WORK/kernel-150-meta.json")"
   KERNEL_ZIP="$WORK/sunbrowser-150-arm64.zip"
   echo "Baixando o pacote oficial do SunBrowser 150..."
   curl --fail --location --retry 4 --retry-delay 3 "$KERNEL_URL" -o "$KERNEL_ZIP"
