@@ -81,6 +81,29 @@ echo "Abrindo o perfil para provocar o download do SunBrowser 150..."
 ENCODED_PROFILE="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$PROFILE_ID")"
 curl -fsS "http://127.0.0.1:$API_PORT/api/v1/browser/start?user_id=$ENCODED_PROFILE&open_tabs=0" >"$WORK/browser-start.json" || true
 
+if grep -qi 'not ready.*download' "$WORK/browser-start.json"; then
+  echo "O AdsPower confirmou que o perfil usa o kernel 150, mas exige o download pelo gerenciador interno."
+  echo "Coletando somente referencias tecnicas do aplicativo para localizar o pacote oficial..."
+  DIAG="$WORK/kernel-discovery"
+  mkdir -p "$DIAG"
+  find "$ADS_APP/Contents/Resources" -maxdepth 3 -type f -print >"$DIAG/resources-files.txt" 2>/dev/null || true
+  ASAR_FILE="$(find "$ADS_APP/Contents/Resources" -maxdepth 2 -type f -name 'app.asar' -print -quit 2>/dev/null || true)"
+  if [[ -n "$ASAR_FILE" ]]; then
+    mkdir -p "$DIAG/app-asar"
+    npx --yes @electron/asar extract "$ASAR_FILE" "$DIAG/app-asar" >/dev/null 2>&1 || true
+    grep -RInaE --binary-files=without-match \
+      'version\.adspower|chrome_[0-9]+|SunBrowser[^[:space:]]{0,80}(download|update)|download[^[:space:]]{0,80}(kernel|browser)|kernel[^[:space:]]{0,80}(download|update)' \
+      "$DIAG/app-asar" >"$DIAG/source-matches.txt" 2>/dev/null || true
+    rm -rf "$DIAG/app-asar"
+  fi
+  find "$HOME/Library/Application Support/adspower_global" -maxdepth 5 -type f -print >"$DIAG/local-files.txt" 2>/dev/null || true
+  grep -RInaE --binary-files=without-match \
+    'version\.adspower|chrome_150|SunBrowser 150|download[^[:space:]]{0,80}(kernel|browser)' \
+    "$HOME/Library/Application Support/adspower_global" >"$DIAG/local-matches.txt" 2>/dev/null || true
+  echo "O endpoint de abertura nao instala kernels. Consulte kernel-discovery no artefato do job." >&2
+  exit 2
+fi
+
 for _ in $(seq 1 180); do
   MARKER="$(find "$KERNEL_DIR" -maxdepth 2 -type f -name 'update_version_key' -print -quit 2>/dev/null || true)"
   APP_BIN="$(find "$KERNEL_DIR" -type f \( -name 'SunBrowser' -o -name 'Chromium' -o -name 'Google Chrome for Testing' \) -perm -111 -print -quit 2>/dev/null || true)"
