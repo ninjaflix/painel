@@ -29,7 +29,7 @@ jobs:
       - name: Confirmar arquitetura
         run: |
           test "$(uname -m)" = "arm64"
-          node -p "require('./package.json').version" | grep -qx "2.0.2"
+          node -p "require('./package.json').version" | grep -qx "2.0.6"
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -40,21 +40,29 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
+      - name: Validar inicializacao, cache e recuperacao de sessao
+        run: |
+          npm run test:startup
+          npm run test:cache
+          npm run test:session-recovery
+          grep -q "platform === 'darwin' ? 'macos'" scripts/local-agent.js
+          grep -q "with administrator privileges" scripts/local-agent.js
+
       - name: Compilar macOS Apple Silicon
         run: npm run build:mac:apple
 
       - name: Testar instalacao, assinatura interna e Gatekeeper
         env:
           EXPECTED_ARCH: arm64
-          EXPECTED_VERSION: 2.0.2
+          EXPECTED_VERSION: 2.0.6
           REPORT_SLUG: MAC-APPLE-SILICON
           REPORT_TITLE: Apple Silicon
         run: |
           chmod +x scripts/test-macos-unsigned-installer.sh
           scripts/test-macos-unsigned-installer.sh \
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/NinjaFlixCompletoSetup-2.0.2-mac-arm64.pkg \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/NinjaFlixCompletoSetup-2.0.6-mac-arm64.pkg \
             ARQUIVOS-GERADOS/RELATORIOS/APPLE-SILICON-ADHOC
-          cat ARQUIVOS-GERADOS/RELATORIOS/APPLE-SILICON-ADHOC/RELATORIO-TESTE-MAC-APPLE-SILICON-2.0.2-ADHOC.md >> "$GITHUB_STEP_SUMMARY"
+          cat ARQUIVOS-GERADOS/RELATORIOS/APPLE-SILICON-ADHOC/RELATORIO-TESTE-MAC-APPLE-SILICON-2.0.6-ADHOC.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Mostrar arquivos gerados
         run: |
@@ -65,9 +73,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="build-2.0.2-temp"
+          TAG="build-2.0.6-temp"
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.2" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.6" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
             gh release view "$TAG" >/dev/null
           gh release upload "$TAG" \
             ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-arm64.zip \
@@ -80,6 +88,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostico-apple-silicon-adhoc-2.0.2
+          name: diagnostico-apple-silicon-adhoc-2.0.6
           path: ARQUIVOS-GERADOS/RELATORIOS/APPLE-SILICON-ADHOC
           retention-days: 30

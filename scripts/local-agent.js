@@ -6,6 +6,7 @@ const path = require('node:path');
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const { URL } = require('node:url');
 const { Readable } = require('node:stream');
+const dns = require('node:dns').promises;
 const WebSocket = require('ws');
 
 const config = require('../src/config');
@@ -20,7 +21,7 @@ const {
 
 const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const PORT = Number(process.env.AGENT_PORT || 3101);
-const APP_VERSION = process.env.AGENT_VERSION || process.env.npm_package_version || '2.0.2';
+const APP_VERSION = process.env.AGENT_VERSION || process.env.npm_package_version || '2.0.6';
 const ADSPOWER_API_PORT = '50326';
 function normalizePortalUrl(value) {
   const raw = String(value || `http://127.0.0.1:${config.port}`).replace(/\/$/, '');
@@ -107,6 +108,7 @@ let catalogEventStreamController = null;
 let catalogEventStreamRunning = false;
 let catalogRefreshTimer = null;
 let adspowerLaunchInFlight = null;
+const diagnosticJobs = new Map();
 let profileStatusMonitorTimer = null;
 const DEFAULT_EXPECTED_ADSPOWER_KERNEL = 150;
 const PROFILE_STATUS_MONITOR_MS = Number(process.env.PROFILE_STATUS_MONITOR_MS || 5000);
@@ -806,6 +808,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
     if(profilesList)new MutationObserver(()=>enforceMaintenanceCards()).observe(profilesList,{childList:true,subtree:true});
     setInterval(async()=>{if(!document.hidden&&currentProfiles.some(profile=>profile?.maintenance)){try{await refreshProfilesSilent();renderCategories();renderProfiles()}catch{}}},15000);
     const checkAdspowerAuthenticated=checkAdspower;
+    function confirmAdspowerOffline(detail){window.__adspowerFailureCount=Number(window.__adspowerFailureCount||0)+1;if(window.__adspowerFailureCount<=3){const retryDetail='Confirmando conexão com o AdsPower... tentativa '+window.__adspowerFailureCount+' de 3';setBadge(adspowerHealth,'checking','AdsPower','AdsPower',retryDetail);setKernelStatus('progress','Verificando AdsPower',retryDetail,'');clearTimeout(window.__adspowerCheckTimer);window.__adspowerCheckTimer=setTimeout(checkAdspower,1000);return}window.__adspowerFailureCount=0;setBadge(adspowerHealth,'offline','AdsPower','AdsPower',detail);setKernelStatus('error','AdsPower desconectado',detail,'')}
     checkAdspower=async function(){
       try{
         const h=await fetch('/health',{cache:'no-store'}).then(r=>r.json());
@@ -821,12 +824,13 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
         if(bootstrapPending){const detail='Aguarde, estamos conectando ao AdsPower...';setBadge(adspowerHealth,'checking','AdsPower','AdsPower',detail);setKernelStatus('progress','Conectando ao AdsPower',detail,'');clearTimeout(window.__adspowerCheckTimer);window.__adspowerCheckTimer=setTimeout(checkAdspower,2000);return}
         setBadge(adspowerHealth,'checking','AdsPower','AdsPower','Aguarde, conectando ao AdsPower...');
         const out=await req('/admin/adspower/profiles');
-        if(out.needsApiKey){const detail='Não foi possível concluir a conexão com o AdsPower. Aguarde e tente novamente.';setBadge(adspowerHealth,'warn','AdsPower','AdsPower',detail);setKernelStatus('warn','Conexão pendente',detail,'adspower');return}
-        if(out.ok===false){const detail='O AdsPower não foi conectado. Tente novamente ou abra o programa pelo atalho do Windows.';setBadge(adspowerHealth,'offline','AdsPower','AdsPower',detail);setKernelStatus('error','AdsPower não conectado',detail,'adspower');return}
+        if(out.needsApiKey){confirmAdspowerOffline('O AdsPower respondeu, mas a conexão não foi autorizada. Abra o AdsPower, confirme o login e aguarde.');return}
+        if(out.ok===false){confirmAdspowerOffline('O AdsPower continua desconectado após 3 verificações. Abra o programa pelo atalho do Windows e aguarde a tela inicial carregar.');return}
         const total=(out.rawProfiles?.data?.list||out.rawProfiles?.data||out.groups||[]).length||0;
         setBadge(adspowerHealth,'online','AdsPower','AdsPower',total?'AdsPower conectado. Ferramentas encontradas: '+total+'.':'AdsPower conectado e pronto para uso.');
+        window.__adspowerFailureCount=0;
         if(headerKernelStatus?.textContent?.includes('AdsPower'))setKernelStatus('','','','');
-      }catch(error){const detail='Não foi possível conectar ao AdsPower. Tente novamente ou abra o programa pelo atalho do Windows.';setBadge(adspowerHealth,'offline','AdsPower','AdsPower',detail);setKernelStatus('error','AdsPower não conectado',detail,'adspower')}
+      }catch(error){confirmAdspowerOffline('O AdsPower continua desconectado após 3 verificações. Abra o programa pelo atalho do Windows e aguarde a tela inicial carregar.')}
     };
     tryStartAdspower=async function(){
       const h=await fetch('/health',{cache:'no-store'}).then(r=>r.json()).catch(()=>({}));if(!h.authenticated)return;
@@ -834,7 +838,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
       setKernelStatus('progress','Abrindo AdsPower','Tentando iniciar o programa. Aguarde a tela inicial do AdsPower carregar.','');
       try{await req('/admin/adspower/start',{method:'POST',body:'{}'});setTimeout(checkAdspower,1500)}catch(error){const instruction='Não foi possível abrir o AdsPower automaticamente. Abra o AdsPower manualmente pelo atalho do Windows, faça login e aguarde a tela inicial carregar.';setKernelStatus('error','Abra o AdsPower manualmente',instruction,'adspower');alert(instruction)}
     };
-    document.addEventListener('click',event=>{const connectButton=event.target.closest('[data-kernel-action="connect-adspower"]');if(!connectButton)return;event.preventDefault();event.stopPropagation();tryStartAdspower()},true);
+    document.addEventListener('click',event=>{const connectButton=event.target.closest('[data-kernel-action="connect-adspower"]');if(!connectButton)return;event.preventDefault();event.stopPropagation()},true);
     (function setupKernelInstallOverlay(){const overlay=document.querySelector('#kernelInstallOverlay'),title=document.querySelector('#kernelInstallTitle'),message=document.querySelector('#kernelInstallMessage'),progress=document.querySelector('#kernelInstallProgress'),percent=document.querySelector('#kernelInstallPercent');let safetyTimer=null;window.kernelInstallOverlayVisible=()=>!overlay.classList.contains('hidden');window.showKernelInstallOverlay=function(text='Iniciando a preparação do navegador...'){clearTimeout(safetyTimer);overlay.classList.remove('hidden');void overlay.offsetWidth;title.textContent='Preparando seu navegador';message.textContent=text;progress.classList.add('indeterminate');progress.style.width='38%';percent.textContent='Aguarde...';safetyTimer=setTimeout(()=>window.finishKernelInstallOverlay?.(false,'A preparação demorou mais que o esperado. Tente novamente.'),10*60*1000)};window.updateKernelInstallOverlay=function(data={}){const hasPercent=data.percent!==null&&data.percent!==undefined&&Number.isFinite(Number(data.percent)),value=hasPercent?Number(data.percent):null;overlay.classList.remove('hidden');title.textContent=data.status==='ready'?'Concluído':'Preparando seu navegador';message.textContent=data.message||'Aguarde enquanto preparamos tudo para abrir seu perfil.';if(hasPercent){progress.classList.remove('indeterminate');progress.style.width=Math.max(0,Math.min(100,value))+'%';percent.textContent=Math.max(0,Math.min(100,value))+'%'}else{progress.classList.add('indeterminate');progress.style.width='38%';percent.textContent=data.attempts?'Tentativa '+data.attempts+' · '+(data.elapsedSeconds||0)+'s':'Aguarde...'}};window.finishKernelInstallOverlay=function(ok,errorMessage=''){clearTimeout(safetyTimer);progress.classList.remove('indeterminate');progress.style.width='100%';title.textContent=ok?'Concluído':'Não foi possível concluir';message.textContent=ok?'Instalação concluída. Finalizando a abertura do perfil...':(errorMessage||'Tente novamente. Se o problema continuar, chame o suporte.');percent.textContent=ok?'100%':'Atenção';setTimeout(()=>overlay.classList.add('hidden'),ok?3000:5000)}})();
     const requestBeforeKernelOverlay=req;req=async function(requestPath,options={}){const opening=requestPath==='/open';try{const response=await requestBeforeKernelOverlay(requestPath,options);if(opening&&window.kernelInstallOverlayVisible?.())window.finishKernelInstallOverlay?.(true);return response}catch(error){if(opening&&window.kernelInstallOverlayVisible?.())window.finishKernelInstallOverlay?.(false);throw error}};
     (function attachKernelInstallEvents(){const timer=setInterval(()=>{const es=window.__runtimeEvents;if(!es||es.__kernelInstallAttached)return;es.__kernelInstallAttached=true;clearInterval(timer);es.addEventListener('kernel-install',event=>{try{const data=JSON.parse(event.data||'{}');if(data.status==='error'){window.finishKernelInstallOverlay?.(false,data.message);return}if(data.status==='ready'){window.updateKernelInstallOverlay?.(data);window.finishKernelInstallOverlay?.(true);return}window.updateKernelInstallOverlay?.(data)}catch{}})},250)})();
@@ -933,6 +937,7 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
       style.textContent='.tool-card-top{display:contents!important}.tool-card-top .tool-badge{position:absolute!important;right:18px!important;top:18px!important;z-index:4!important}.favorite-toggle{position:absolute!important;right:20px!important;bottom:18px!important;top:auto!important;z-index:4!important;width:27px;height:27px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:#64748b;font-size:19px}.favorite-toggle:hover{background:transparent!important;transform:scale(1.08)!important}.favorite-toggle.is-favorite{color:#facc15}.agent-popup:not(.theme-transparent) .agent-modal{width:min(430px,calc(100vw - 32px))!important;max-width:430px!important}.agent-popup.theme-transparent{background:rgba(3,4,11,.38);backdrop-filter:blur(4px)}.agent-popup.theme-transparent .agent-modal{position:relative;max-width:min(860px,calc(100vw - 32px));padding:0;border:0;background:transparent;box-shadow:none;overflow:visible}.agent-popup.theme-transparent .modal-head{position:absolute;right:-4px;top:-42px}.agent-popup.theme-transparent .modal-head h2{display:none}.agent-popup.theme-transparent .modal-close{background:#0b0d19;border-color:rgba(255,255,255,.35)}.popup-banner{display:block;width:100%;max-height:calc(100vh - 150px);object-fit:contain;border-radius:24px}.popup-banner-action{display:flex;justify-content:center;margin-top:14px}.agent-popup.theme-transparent .popup-cta{margin:0;min-width:180px;justify-content:center}';
       style.textContent+='.agent-popup.theme-transparent .modal-head{right:10px;top:10px;z-index:20;margin:0}.agent-popup.theme-transparent .modal-close{display:grid;place-items:center;width:44px;height:44px;border:1px solid rgba(255,255,255,.65);border-radius:999px;background:rgba(11,13,25,.9);color:#fff;font-size:22px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.5)}.agent-popup.theme-transparent #agentPopupBody{display:grid;place-items:center;max-width:100%;overflow:auto;padding:0 52px}.agent-popup.theme-transparent .popup-banner{max-width:none}';
       style.textContent+='.agent-intro{background:#03040b!important;backdrop-filter:none!important}.agent-intro-card{width:min(510px,calc(100vw - 32px))!important}.tools-content #profilesList:empty::before{content:""!important;display:none!important}.tools-grid .profile-card{content-visibility:auto;contain-intrinsic-size:250px}.info-row .chip[class*="validity-"]{transition:color .25s ease,border-color .25s ease,background .25s ease,box-shadow .25s ease}.info-row .chip.validity-5{color:#facc15;border-color:rgba(250,204,21,.55);background:rgba(250,204,21,.08)}.info-row .chip.validity-4{color:#fbbf24;border-color:rgba(251,191,36,.62);background:rgba(251,191,36,.10)}.info-row .chip.validity-3{color:#f59e0b;border-color:rgba(245,158,11,.68);background:rgba(245,158,11,.12)}.info-row .chip.validity-2{color:#f97316;border-color:rgba(249,115,22,.74);background:rgba(249,115,22,.14)}.info-row .chip.validity-1{color:#ea580c;border-color:rgba(234,88,12,.82);background:rgba(234,88,12,.16);box-shadow:0 0 20px rgba(234,88,12,.14)}.info-row .chip.validity-0{color:#dc4a1f;border-color:rgba(220,74,31,.9);background:rgba(220,74,31,.18);box-shadow:0 0 22px rgba(220,74,31,.18)}';
+      style.textContent+='.tools-grid .profile-card,.tools-grid .tool-card,.profile-card{border-color:#362d3e!important}button[data-kernel-action="connect-adspower"]{display:none!important}';
       document.head.append(style);
       const applyUserSubscriptionBase=applyUserSubscription;
       applyUserSubscription=function(user){const validity=applyUserSubscriptionBase(user),chip=subscriptionInfo?.closest('.chip');if(chip){chip.classList.remove('validity-5','validity-4','validity-3','validity-2','validity-1','validity-0');const due=parseLocalDate(user?.subscriptionEndsAt),today=new Date(),todayOnly=new Date(today.getFullYear(),today.getMonth(),today.getDate()),remaining=due?Math.ceil((due.getTime()-todayOnly.getTime())/86400000):null;if(Number.isFinite(remaining)&&remaining>=0&&remaining<=5)chip.classList.add('validity-'+remaining)}return validity};
@@ -1017,17 +1022,25 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
       style.textContent='.support-chat-button{position:fixed;right:28px;bottom:24px;z-index:1450;display:flex;align-items:center;gap:9px;width:auto!important;min-height:48px;padding:8px 16px 8px 8px;border:1px solid rgba(192,132,252,.58);border-radius:999px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;font-weight:900;box-shadow:0 18px 50px rgba(76,29,149,.42)}.support-chat-icon{width:31px;height:31px;display:grid;place-items:center;border-radius:999px;background:rgba(255,255,255,.18);font-size:17px}.support-chat-button b{position:absolute;right:-4px;top:-5px;min-width:21px;height:21px;display:grid;place-items:center;border:2px solid #080912;border-radius:999px;background:#ef4444;color:#fff;font-size:10px}.support-chat-panel{position:fixed;right:28px;bottom:84px;z-index:1450;width:min(430px,calc(100vw - 32px));height:min(650px,calc(100vh - 120px));display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;border:1px solid rgba(168,85,247,.55);border-radius:24px;background:#0b0c18;color:#f8f7ff;box-shadow:0 28px 90px rgba(0,0,0,.62)}.support-chat-panel>header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid rgba(148,163,184,.18);background:linear-gradient(135deg,rgba(124,58,237,.28),rgba(11,12,24,.96))}.support-chat-panel>header div{display:grid}.support-chat-panel>header small{color:#aaa8bf}.support-chat-panel>header button{width:32px;height:32px;padding:0;border:0;background:transparent;color:inherit;font-size:24px}.support-chat-body{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;padding:0}.support-chat-body.new-ticket{display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding:16px;scrollbar-width:thin;scrollbar-color:#8b5cf6 transparent}.support-chat-loading,.support-chat-empty{margin:auto;color:#aaa8bf;text-align:center}.support-chat-ticket-title{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(148,163,184,.14);background:rgba(18,20,37,.82)}.support-chat-ticket-title span{display:grid}.support-chat-ticket-title small{color:#aaa8bf}.support-chat-messages{min-height:0;display:flex;flex-direction:column;gap:12px;overflow-y:auto;overscroll-behavior:contain;padding:16px;scrollbar-width:thin;scrollbar-color:#8b5cf6 transparent}.support-chat-messages::-webkit-scrollbar,.support-chat-body.new-ticket::-webkit-scrollbar,.support-chat-tools::-webkit-scrollbar{width:6px}.support-chat-messages::-webkit-scrollbar-track,.support-chat-body.new-ticket::-webkit-scrollbar-track,.support-chat-tools::-webkit-scrollbar-track{background:transparent}.support-chat-messages::-webkit-scrollbar-thumb,.support-chat-body.new-ticket::-webkit-scrollbar-thumb,.support-chat-tools::-webkit-scrollbar-thumb{border-radius:999px;background:linear-gradient(#c084fc,#7c3aed)}.support-chat-message{align-self:flex-end;max-width:84%;padding:11px 13px;border:1px solid rgba(192,132,252,.5);border-radius:17px 17px 5px 17px;background:linear-gradient(135deg,rgba(124,58,237,.42),rgba(88,28,135,.28));box-shadow:0 6px 22px rgba(76,29,149,.12)}.support-chat-message.admin{align-self:flex-start;border-color:rgba(148,163,184,.25);border-radius:17px 17px 17px 5px;background:#171928}.support-chat-message small{display:block;margin-bottom:5px;color:#c4b5fd;font-size:10px;font-weight:800}.support-chat-message.admin small{color:#b8bdd0}.support-chat-message p{margin:0;white-space:pre-wrap;line-height:1.48}.support-chat-compose{display:grid;gap:8px;margin:0;padding:12px 14px 14px;border-top:1px solid rgba(148,163,184,.16);background:#0f1020;box-shadow:0 -12px 30px rgba(4,5,12,.45)}.support-chat-body.new-ticket .support-chat-compose{margin-top:auto;padding:0;border:0;background:transparent;box-shadow:none}.support-chat-compose textarea{min-height:66px;max-height:120px;resize:vertical;border:1px solid rgba(168,85,247,.42);border-radius:14px;background:#080914;color:#fff;padding:11px 12px;font:inherit;outline:none}.support-chat-compose textarea:focus{border-color:#a855f7;box-shadow:0 0 0 3px rgba(168,85,247,.14)}.support-chat-compose button{min-height:43px;border:1px solid #c084fc!important;background:linear-gradient(135deg,#a855f7,#7c3aed)!important;color:#fff!important;font-weight:900!important;box-shadow:0 9px 24px rgba(124,58,237,.28)}.support-chat-compose button:disabled{opacity:.65;cursor:wait}.support-chat-topics,.support-chat-tools{display:grid;gap:8px}.support-chat-choice{display:grid!important;gap:3px;width:100%!important;padding:12px!important;text-align:left!important;border:1px solid rgba(148,163,184,.2)!important;border-radius:14px!important;background:#121425!important;color:inherit!important}.support-chat-choice small{color:#aaa8bf;font-weight:500}.support-chat-tools{max-height:300px;overflow:auto;scrollbar-width:thin;scrollbar-color:#8b5cf6 transparent}.support-chat-tool{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(148,163,184,.18);border-radius:11px;background:#121425}.support-chat-tool input{width:auto}.support-chat-step-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.support-chat-step-head div{display:grid;gap:3px}.support-chat-step-head small{color:#aaa8bf}.support-chat-back{width:auto!important;padding:6px 9px!important;background:transparent!important}.support-chat-error{padding:9px 11px;border:1px solid rgba(251,113,133,.4);border-radius:12px;color:#fecdd3;background:rgba(251,113,133,.08)}.support-chat-panel.light{background:#fff;color:#20172d;border-color:#d8b4fe;box-shadow:0 28px 90px rgba(45,24,73,.24)}.support-chat-panel.light>header{background:linear-gradient(135deg,#f5edff,#fff);border-color:#eadcf8}.support-chat-panel.light>header small,.support-chat-panel.light .support-chat-ticket-title small,.support-chat-panel.light .support-chat-step-head small,.support-chat-panel.light .support-chat-choice small{color:#71677e}.support-chat-panel.light .support-chat-ticket-title{background:#faf7ff;border-color:#eadcf8}.support-chat-panel.light .support-chat-message.admin{background:#f4f1f7;border-color:#ded8e5;color:#2a2232}.support-chat-panel.light .support-chat-message.admin small{color:#665d70}.support-chat-panel.light .support-chat-message.customer{background:linear-gradient(135deg,#8b5cf6,#6d28d9);border-color:#8b5cf6;color:#fff}.support-chat-panel.light .support-chat-message.customer small{color:#eee5ff}.support-chat-panel.light .support-chat-compose{background:#fff;border-color:#eadcf8;box-shadow:0 -12px 28px rgba(76,29,149,.08)}.support-chat-panel.light .support-chat-compose textarea{background:#faf8fc;color:#20172d;border-color:#d8c8e8}.support-chat-panel.light .support-chat-choice,.support-chat-panel.light .support-chat-tool{background:#faf8fc;border-color:#e7dcef;color:#20172d!important}body.login-mode .support-chat-button,body.login-mode .support-chat-panel{display:none!important}@media(max-width:600px){.support-chat-button{right:14px;bottom:14px}.support-chat-panel{right:8px;bottom:72px;width:calc(100vw - 16px);height:calc(100vh - 90px);border-radius:20px}}';
       style.textContent+=' .support-chat-search{width:100%;min-height:42px;padding:9px 11px;border:1px solid rgba(168,85,247,.35);border-radius:12px;background:#080914;color:inherit;font:inherit;outline:none}.support-chat-search:focus{border-color:#a855f7;box-shadow:0 0 0 3px rgba(168,85,247,.12)}.support-chat-quick-replies{display:grid;gap:8px}.support-chat-quick-choice{font-weight:500!important}.support-chat-quick-choice strong{font-weight:500}.support-chat-panel.light .support-chat-search{background:#faf8fc;border-color:#d8c8e8;color:#20172d}';
       style.textContent+=' .support-chat-panel{overflow:visible}.support-chat-panel>header{position:relative;border-radius:23px 23px 0 0}.support-chat-panel>header>button{position:absolute;right:2px;top:-43px;width:34px!important;height:34px!important;display:grid!important;place-items:center!important;border:1px solid rgba(192,132,252,.5)!important;border-radius:999px!important;background:#111222!important;color:#fff!important;font-family:Arial,sans-serif!important;font-size:24px!important;font-weight:400!important;line-height:1!important;box-shadow:0 10px 28px rgba(0,0,0,.38)}.support-chat-panel.light>header>button{background:#fff!important;color:#2a1738!important}.support-chat-body{border-radius:0 0 23px 23px;background:#0b0c18}.support-chat-panel.light .support-chat-body{background:#fff}';
+      style.textContent+=' .support-chat-message p{white-space:normal!important;overflow-wrap:anywhere;word-break:normal}.support-chat-message a{color:#c084fc;text-decoration:underline;overflow-wrap:anywhere}.support-chat-attachment{display:block;width:auto;max-width:min(240px,100%);max-height:180px;margin-top:8px;border-radius:10px;object-fit:contain;background:#080914}.support-chat-message video.support-chat-attachment{width:min(340px,100%);max-height:210px;aspect-ratio:16/9}.support-chat-compose-tools{display:flex;align-items:center;gap:7px;min-height:28px}.support-chat-compose-tools label,.support-chat-tool-button{width:auto!important;min-height:28px!important;padding:3px 8px!important;border:1px solid rgba(168,85,247,.35)!important;border-radius:9px!important;background:transparent!important;cursor:pointer}.support-chat-compose-tools span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aaa8bf;font-size:11px}.support-chat-finish{margin-left:auto!important;color:#9ca3af!important;font-size:10px!important}.support-chat-emoji-picker{display:flex;flex-wrap:wrap;gap:4px;padding:7px;border:1px solid rgba(168,85,247,.35);border-radius:11px;background:#111222}.support-chat-emoji-picker button{display:grid!important;place-items:center!important;width:30px!important;height:30px!important;min-height:30px!important;padding:0!important;border:0!important;background:transparent!important;font-size:18px!important;box-shadow:none!important}.support-chat-link-button{display:inline-flex!important;align-items:center;justify-content:center;margin-top:8px;padding:8px 12px;border-radius:9px;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff!important;font-size:11px;font-weight:800;text-decoration:none!important}';
       document.head.append(style);
       let tickets=[],stage=0,category='',selectedTools=new Set(),loadPromise=null,loadQueued=false,sending=false;
       function operationId(prefix){return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10)}
+      function messageHtml(value){return esc(value).replace(/(https?:\\/\\/[^\\s<]+)/gi,'<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>').replace(/\\r?\\n/g,'<br>')}
+      function attachmentHtml(item){if(!item?.url)return'';const url=esc(item.url),name=esc(item.name||'Anexo');return String(item.mimeType||'').startsWith('video/')?'<video class="support-chat-attachment" controls preload="metadata" src="'+url+'"></video><a href="'+url+'" target="_blank" rel="noopener">'+name+'</a>':'<a href="'+url+'" target="_blank" rel="noopener"><img class="support-chat-attachment" src="'+url+'" alt="'+name+'" loading="lazy"></a>'}
+      function linkButtonHtml(item){return item?.url&&item?.label?'<a class="support-chat-link-button" href="'+esc(item.url)+'" target="_blank" rel="noopener noreferrer">'+esc(item.label)+'</a>':''}
+      function fileAttachment(file){return new Promise((resolve,reject)=>{if(!file)return resolve(null);if(file.size>50*1024*1024)return reject(new Error('O anexo deve ter no máximo 50 MB'));const reader=new FileReader();reader.onerror=()=>reject(new Error('Falha ao ler o anexo'));reader.onload=()=>resolve({name:file.name,mimeType:file.type,data:String(reader.result||'')});reader.readAsDataURL(file)})}
+      const chatEmojis=['😀','😃','😄','😁','😂','😊','😍','🥰','😎','🤩','🤔','👍','👎','👏','🙌','🙏','💜','🔥','✅','⚠️','🎉','🚀','💡','📌'];
+      function emojiPickerMarkup(){return '<div class="support-chat-emoji-picker hidden" data-chat-emoji-picker>'+chatEmojis.map(emoji=>'<button type="button" data-chat-emoji-choice="'+emoji+'">'+emoji+'</button>').join('')+'</div>'}
+      function bindChatComposer(form){form?.querySelector('[name="attachment"]')?.addEventListener('change',event=>{form.querySelector('[data-chat-file-name]').textContent=event.target.files?.[0]?.name||''});form?.querySelector('[data-chat-emoji]')?.addEventListener('click',()=>form.querySelector('[data-chat-emoji-picker]')?.classList.toggle('hidden'));form?.querySelector('[data-chat-emoji-picker]')?.addEventListener('click',event=>{const choice=event.target.closest('[data-chat-emoji-choice]');if(!choice)return;const textarea=form.querySelector('textarea');textarea.value+=(choice.dataset.chatEmojiChoice||'');textarea.focus();choice.closest('[data-chat-emoji-picker]')?.classList.add('hidden')})}
       function syncTheme(){const declared=String(document.documentElement.dataset.theme||document.body.dataset.theme||localStorage.getItem('theme')||'').toLowerCase();let light=/light|claro/.test(declared)||document.documentElement.classList.contains('light')||document.body.classList.contains('light')||document.body.classList.contains('light-mode');if(!declared&&!light){const rgb=getComputedStyle(document.body).backgroundColor.match(/[\d.]+/g);if(rgb&&rgb.length>=3)light=(Number(rgb[0])+Number(rgb[1])+Number(rgb[2]))/3>185}panel.classList.toggle('light',light)}
       function activeTicket(){return tickets.find(ticket=>ticket&&ticket.status!=='closed'&&!ticket.archived)||null}
       function latestAdminId(){for(const ticket of tickets){const messages=Array.isArray(ticket.messages)?ticket.messages:[];for(let i=messages.length-1;i>=0;i-=1)if(messages[i]?.from==='admin')return String(messages[i].id||messages[i].createdAt||'')}return''}
       function updateUnread(){const latest=latestAdminId(),read=localStorage.getItem('ninjaflix:support-last-read')||'',count=latest&&latest!==read?1:0;unread.textContent=String(count);unread.classList.toggle('hidden',!count);button.classList.toggle('has-unread',Boolean(count))}
       function markRead(){const latest=latestAdminId();if(latest)localStorage.setItem('ninjaflix:support-last-read',latest);updateUnread()}
-      function messagesMarkup(ticket){return (ticket.messages||[]).map(message=>'<div class="support-chat-message '+(message.from==='admin'?'admin':'customer')+'"><small>'+(message.from==='admin'?'Suporte NinjaFlix':'Você')+' · '+new Date(message.createdAt||Date.now()).toLocaleString('pt-BR')+'</small><p>'+esc(message.message||'')+'</p></div>').join('')}
+      function messagesMarkup(ticket){return (ticket.messages||[]).map(message=>'<div class="support-chat-message '+(message.from==='admin'?'admin':'customer')+'"><small>'+(message.from==='admin'?'Suporte NinjaFlix':'Você')+' · '+new Date(message.createdAt||Date.now()).toLocaleString('pt-BR')+'</small>'+(message.message?'<p>'+messageHtml(message.message)+'</p>':'')+attachmentHtml(message.attachment)+linkButtonHtml(message.linkButton)+'</div>').join('')}
       function scrollMessagesToEnd(){const messages=body.querySelector('.support-chat-messages');if(messages)requestAnimationFrame(()=>{messages.scrollTop=messages.scrollHeight})}
-      function renderTicket(ticket){body.classList.remove('new-ticket');body.innerHTML='<div class="support-chat-ticket-title"><span><strong>'+esc(ticket.categoryLabel||ticket.subject||'Atendimento')+'</strong><small>Ticket em andamento</small></span><span class="tool-badge">'+supportStatusText(ticket.status)+'</span></div><div class="support-chat-messages" role="log" aria-live="polite">'+messagesMarkup(ticket)+'</div><form id="supportChatReply" class="support-chat-compose"><textarea name="message" placeholder="Digite sua mensagem..." maxlength="4000" required></textarea><button type="submit">Enviar mensagem</button><div class="support-chat-send-status" aria-live="polite"></div></form>';scrollMessagesToEnd();body.querySelector('#supportChatReply')?.addEventListener('submit',sendReply)}
+      function renderTicket(ticket){body.classList.remove('new-ticket');body.innerHTML='<div class="support-chat-ticket-title"><span><strong>'+esc(ticket.categoryLabel||ticket.subject||'Atendimento')+'</strong><small>Ticket em andamento</small></span><span class="tool-badge">'+supportStatusText(ticket.status)+'</span></div><div class="support-chat-messages" role="log" aria-live="polite">'+messagesMarkup(ticket)+'</div><form id="supportChatReply" class="support-chat-compose"><textarea name="message" placeholder="Digite sua mensagem..." maxlength="4000"></textarea><div class="support-chat-compose-tools"><label title="Anexar">📎<input hidden name="attachment" type="file" accept="image/*,video/mp4,video/webm,video/quicktime"></label><button class="support-chat-tool-button" data-chat-emoji type="button">😊</button><button class="support-chat-tool-button support-chat-finish" data-chat-finish type="button">✓ Finalizar</button><span data-chat-file-name></span></div>'+emojiPickerMarkup()+'<button type="submit">Enviar mensagem</button><div class="support-chat-send-status" aria-live="polite"></div></form>';scrollMessagesToEnd();const form=body.querySelector('#supportChatReply');form?.addEventListener('submit',sendReply);form?.querySelector('[data-chat-finish]')?.addEventListener('click',finishTicket);bindChatComposer(form)}
       function availableToolNames(){const names=[];uniqueProfilesWithCategories().filter(profile=>profileIsAvailable(profile)).forEach(profile=>{const name=String(profile.name||'').trim();if(name&&!names.includes(name))names.push(name)});return names.sort((a,b)=>a.localeCompare(b,'pt-BR'))}
       function renderNewTicket(){
         body.classList.add('new-ticket');
@@ -1035,21 +1048,35 @@ html,body{width:100%!important;min-height:100vh!important;height:auto!important;
         const topic=topics.find(item=>item.id===category)||topics[topics.length-1];
         if(stage===1&&topic.tools){const tools=availableToolNames();body.innerHTML='<div class="support-chat-step-head"><div><strong>Selecione as ferramentas</strong><small>Marque uma ou mais opções relacionadas.</small></div><button class="support-chat-back" data-support-back type="button">Voltar</button></div><input class="support-chat-search" data-support-tool-search type="search" placeholder="Buscar ferramenta..." autocomplete="off"><div class="support-chat-tools">'+(tools.length?tools.map(name=>'<label class="support-chat-tool" data-support-tool-name="'+esc(name.toLocaleLowerCase('pt-BR'))+'"><input type="checkbox" value="'+esc(name)+'" '+(selectedTools.has(name)?'checked':'')+'/><span>'+esc(name)+'</span></label>').join(''):'<div class="support-chat-empty">Nenhuma ferramenta disponível.</div>')+'<div class="support-chat-empty hidden" data-support-search-empty>Nenhuma ferramenta encontrada.</div></div><button data-support-tools-next type="button">Continuar</button>';return}
         const quick=category==='ferramentas_deslogadas'?'<div class="support-chat-quick-replies">'+quickReplies.map(text=>'<button class="support-chat-choice support-chat-quick-choice" data-support-chat-quick="'+esc(text)+'" type="button">'+esc(text)+'</button>').join('')+'</div>':'';
-        body.innerHTML='<div class="support-chat-step-head"><div><strong>'+esc(topic.title)+'</strong><small>Conte o que aconteceu.</small></div><button class="support-chat-back" data-support-back type="button">Voltar</button></div>'+quick+'<form id="supportChatCreate" class="support-chat-compose"><textarea name="message" placeholder="Descreva sua solicitação" required></textarea><button type="submit">Abrir solicitação</button></form>';body.querySelector('#supportChatCreate')?.addEventListener('submit',createTicket)
+        body.innerHTML='<div class="support-chat-step-head"><div><strong>'+esc(topic.title)+'</strong><small>Conte o que aconteceu.</small></div><button class="support-chat-back" data-support-back type="button">Voltar</button></div>'+quick+'<form id="supportChatCreate" class="support-chat-compose"><textarea name="message" placeholder="Descreva sua solicitação"></textarea><div class="support-chat-compose-tools"><label title="Anexar imagem ou vídeo">📎<input hidden name="attachment" type="file" accept="image/*,video/mp4,video/webm,video/quicktime"></label><button class="support-chat-tool-button" data-chat-emoji type="button">😊</button><span data-chat-file-name></span></div>'+emojiPickerMarkup()+'<button type="submit">Abrir solicitação</button><div class="support-chat-send-status" aria-live="polite"></div></form>';const form=body.querySelector('#supportChatCreate');form?.addEventListener('submit',createTicket);bindChatComposer(form)
       }
       function render(){const active=activeTicket();if(active)renderTicket(active);else renderNewTicket()}
-      async function load(options={}){if(loadPromise){loadQueued=true;return loadPromise}loadPromise=req('/support-tickets').then(out=>{tickets=Array.isArray(out.tickets)?out.tickets:[];if(Array.isArray(out.config?.topics)&&out.config.topics.length)topics=out.config.topics;if(Array.isArray(out.config?.quickReplies)&&out.config.quickReplies.length)quickReplies=out.config.quickReplies;button.classList.remove('hidden');updateUnread();if(!panel.classList.contains('hidden')){render();if(options.markRead)markRead()}}).catch(()=>{if(!tickets.length)button.classList.add('hidden')}).finally(()=>{loadPromise=null;if(loadQueued){loadQueued=false;setTimeout(()=>load(options),0)}});return loadPromise}
-      async function createTicket(event){event.preventDefault();if(sending)return;const form=event.currentTarget,message=String(new FormData(form).get('message')||'').trim();if(!message)return;const submit=form.querySelector('button[type="submit"]'),requestId=operationId('ticket');sending=true;submit.disabled=true;submit.textContent='Enviando...';try{await req('/support-tickets',{method:'POST',body:JSON.stringify({category,message,tools:Array.from(selectedTools),clientRequestId:requestId})});stage=0;category='';selectedTools.clear();await load({markRead:true})}catch(error){form.querySelector('.support-chat-error')?.remove();form.insertAdjacentHTML('beforeend','<div class="support-chat-error">'+esc(error.message||'NÃ£o foi possÃ­vel abrir a solicitaÃ§Ã£o. Tente novamente.')+'</div>');submit.disabled=false;submit.textContent='Abrir solicitaÃ§Ã£o'}finally{sending=false}}
-      async function sendReply(event){event.preventDefault();if(sending)return;const ticket=activeTicket(),form=event.currentTarget,textarea=form.querySelector('textarea'),message=String(textarea?.value||'').trim();if(!ticket||!message)return;const submit=form.querySelector('button'),status=form.querySelector('.support-chat-send-status'),messageId=operationId('message');sending=true;submit.disabled=true;submit.textContent='Enviando...';if(status)status.textContent='';try{await req('/support-tickets/'+encodeURIComponent(ticket.id)+'/messages',{method:'POST',body:JSON.stringify({message,clientMessageId:messageId})});textarea.value='';await load({markRead:true})}catch(error){if(status){status.className='support-chat-send-status support-chat-error';status.textContent=error.message||'Falha ao enviar. Sua mensagem foi mantida para tentar novamente.'}submit.disabled=false;submit.textContent='Enviar mensagem'}finally{sending=false}}
+      function renderLoadError(message){body.classList.add('new-ticket');body.innerHTML='<div class="support-chat-error">'+esc(message||'Não foi possível carregar o suporte agora.')+'</div><button class="support-chat-choice" data-support-retry type="button">Tentar novamente</button>'}
+      async function load(options={}){button.classList.remove('hidden');if(loadPromise){loadQueued=true;return loadPromise}loadPromise=req('/support-tickets').then(out=>{tickets=Array.isArray(out.tickets)?out.tickets:[];if(Array.isArray(out.config?.topics)&&out.config.topics.length)topics=out.config.topics;if(Array.isArray(out.config?.quickReplies)&&out.config.quickReplies.length)quickReplies=out.config.quickReplies;updateUnread();if(!panel.classList.contains('hidden')){render();if(options.markRead)markRead()}}).catch(error=>{button.classList.remove('hidden');if(!panel.classList.contains('hidden')&&!tickets.length)renderLoadError(error.message)}).finally(()=>{loadPromise=null;if(loadQueued){loadQueued=false;setTimeout(()=>load(options),0)}});return loadPromise}
+      async function createTicket(event){event.preventDefault();if(sending)return;const form=event.currentTarget,message=String(new FormData(form).get('message')||'').trim(),submit=form.querySelector('button[type="submit"]'),requestId=operationId('ticket');let attachment=null;try{attachment=await fileAttachment(form.querySelector('[name="attachment"]')?.files?.[0])}catch(error){form.insertAdjacentHTML('beforeend','<div class="support-chat-error">'+esc(error.message)+'</div>');return}if(!message&&!attachment)return;sending=true;submit.disabled=true;submit.textContent='Enviando...';try{await req('/support-tickets',{method:'POST',body:JSON.stringify({category,message,tools:Array.from(selectedTools),attachment,clientRequestId:requestId})});stage=0;category='';selectedTools.clear();await load({markRead:true})}catch(error){form.querySelector('.support-chat-error')?.remove();form.insertAdjacentHTML('beforeend','<div class="support-chat-error">'+esc(error.message||'Não foi possível abrir a solicitação. Tente novamente.')+'</div>');submit.disabled=false;submit.textContent='Abrir solicitação'}finally{sending=false}}
+      async function sendReply(event){event.preventDefault();if(sending)return;const ticket=activeTicket(),form=event.currentTarget,textarea=form.querySelector('textarea'),message=String(textarea?.value||'').trim(),submit=form.querySelector('button[type="submit"]'),status=form.querySelector('.support-chat-send-status'),messageId=operationId('message');let attachment=null;try{attachment=await fileAttachment(form.querySelector('[name="attachment"]')?.files?.[0])}catch(error){if(status){status.className='support-chat-send-status support-chat-error';status.textContent=error.message}return}if(!ticket||(!message&&!attachment))return;sending=true;submit.disabled=true;submit.textContent='Enviando...';if(status)status.textContent='';try{await req('/support-tickets/'+encodeURIComponent(ticket.id)+'/messages',{method:'POST',body:JSON.stringify({message,attachment,clientMessageId:messageId})});textarea.value='';await load({markRead:true})}catch(error){if(status){status.className='support-chat-send-status support-chat-error';status.textContent=error.message||'Falha ao enviar. Sua mensagem foi mantida para tentar novamente.'}submit.disabled=false;submit.textContent='Enviar mensagem'}finally{sending=false}}
+      async function finishTicket(event){const ticket=activeTicket();if(!ticket||sending)return;if(!confirm('Finalizar este atendimento?'))return;const target=event.currentTarget;target.disabled=true;try{await req('/support-tickets/'+encodeURIComponent(ticket.id)+'/close',{method:'POST',body:'{}'});await load({markRead:true})}catch(error){alert(error.message||'Não foi possível finalizar o atendimento.');target.disabled=false}}
       button.addEventListener('click',async()=>{panel.classList.toggle('hidden');if(!panel.classList.contains('hidden')){syncTheme();await load({markRead:true})}});
       closeButton.addEventListener('click',()=>{panel.classList.add('hidden');markRead()});
       document.addEventListener('click',event=>{if(panel.classList.contains('hidden')||event.target.closest('#supportChatPanel')||event.target.closest('#supportChatButton'))return;panel.classList.add('hidden');markRead()},true);
-      body.addEventListener('click',event=>{const topicButton=event.target.closest('[data-support-topic]');if(topicButton){category=topicButton.dataset.supportTopic;selectedTools.clear();stage=(topics.find(item=>item.id===category)?.tools)?1:2;render();return}if(event.target.closest('[data-support-back]')){stage=Math.max(0,stage-1);render();return}if(event.target.closest('[data-support-tools-next]')){selectedTools=new Set(Array.from(body.querySelectorAll('.support-chat-tool input:checked')).map(input=>input.value));stage=2;render();return}const quick=event.target.closest('[data-support-chat-quick]');if(quick){const textarea=body.querySelector('textarea[name="message"]');if(textarea){textarea.value=quick.dataset.supportChatQuick||'';textarea.focus()}}});
+      body.addEventListener('click',event=>{if(event.target.closest('[data-support-retry]')){load();return}const topicButton=event.target.closest('[data-support-topic]');if(topicButton){category=topicButton.dataset.supportTopic;selectedTools.clear();stage=(topics.find(item=>item.id===category)?.tools)?1:2;render();return}if(event.target.closest('[data-support-back]')){stage=Math.max(0,stage-1);render();return}if(event.target.closest('[data-support-tools-next]')){selectedTools=new Set(Array.from(body.querySelectorAll('.support-chat-tool input:checked')).map(input=>input.value));stage=2;render();return}const quick=event.target.closest('[data-support-chat-quick]');if(quick){const textarea=body.querySelector('textarea[name="message"]');if(textarea){textarea.value=quick.dataset.supportChatQuick||'';textarea.focus()}}});
       body.addEventListener('input',event=>{if(!event.target.matches('[data-support-tool-search]'))return;const query=String(event.target.value||'').trim().toLocaleLowerCase('pt-BR');let visible=0;body.querySelectorAll('[data-support-tool-name]').forEach(item=>{const show=!query||String(item.dataset.supportToolName||'').includes(query);item.classList.toggle('hidden',!show);if(show)visible+=1});body.querySelector('[data-support-search-empty]')?.classList.toggle('hidden',visible>0)});
+      button.classList.remove('hidden');
       const observer=new MutationObserver(()=>{if(!agentCard?.classList.contains('hidden'))load()});if(agentCard)observer.observe(agentCard,{attributes:true,attributeFilter:['class']});
       new MutationObserver(syncTheme).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-theme']});syncTheme();
       const eventTimer=setInterval(()=>{const events=window.__runtimeEvents;if(!events||events.__supportChatAttached)return;events.__supportChatAttached=true;clearInterval(eventTimer);events.addEventListener('support-chat-changed',()=>load({markRead:!panel.classList.contains('hidden')}))},250);
       setTimeout(()=>{if(!agentCard?.classList.contains('hidden'))load()},900);setInterval(()=>{if(!document.hidden&&!agentCard?.classList.contains('hidden'))load()},60000)
+    })();
+    (()=>{
+      const style=document.createElement('style');style.textContent='.diagnostic-backdrop{position:fixed;inset:0;z-index:2600;display:grid;place-items:center;padding:20px;background:rgba(2,3,10,.84);backdrop-filter:blur(10px)}.diagnostic-card{width:min(510px,100%);display:grid;gap:16px;padding:24px;border:1px solid #6d3a91;border-radius:22px;background:#111222;box-shadow:0 28px 90px rgba(0,0,0,.65);color:#fff}.diagnostic-card h2,.diagnostic-card p{margin:0}.diagnostic-card p{color:#bbb5ca;line-height:1.55}.diagnostic-actions{display:flex;justify-content:flex-end;gap:9px}.diagnostic-actions button:last-child{background:linear-gradient(135deg,#a855f7,#7c3aed)}.diagnostic-progress{height:9px;overflow:hidden;border-radius:999px;background:#29263a}.diagnostic-progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,#7c3aed,#c084fc);transition:width .35s ease}.diagnostic-step{min-height:20px;color:#ddd6fe;font-weight:800}';document.head.append(style);
+      const modal=document.createElement('div');modal.className='diagnostic-backdrop hidden';modal.innerHTML='<section class="diagnostic-card"><div><small>SUPORTE NINJAFLIX</small><h2>Diagnóstico do painel</h2></div><p data-diagnostic-copy>O suporte solicitou uma verificação técnica desta máquina. O diagnóstico não acessa senhas, cookies, arquivos pessoais ou conteúdo dos sites.</p><div class="diagnostic-progress hidden"><i></i></div><div class="diagnostic-step"></div><div class="diagnostic-actions"><button class="secondary" data-diagnostic-decline type="button">Agora não</button><button data-diagnostic-accept type="button">Autorizar diagnóstico</button></div></section>';document.body.appendChild(modal);
+      let active=null,pollTimer=null;
+      async function showRequest(item){if(!item||active?.id===item.id)return;active=item;modal.classList.remove('hidden');modal.querySelector('[data-diagnostic-copy]').textContent='O suporte solicitou uma verificação técnica desta máquina. O diagnóstico não acessa senhas, cookies, arquivos pessoais ou conteúdo dos sites.';modal.querySelector('.diagnostic-progress').classList.add('hidden');modal.querySelector('.diagnostic-step').textContent='Aguardando sua autorização';modal.querySelector('.diagnostic-actions').classList.remove('hidden')}
+      async function checkPending(){try{const out=await req('/diagnostics/pending');const item=(out.diagnostics||[])[0];if(item)showRequest(item)}catch{}}
+      async function poll(){if(!active)return;try{const out=await req('/diagnostics/'+encodeURIComponent(active.id)+'/status'),item=out.diagnostic;if(!item)return;modal.querySelector('.diagnostic-progress i').style.width=Number(item.progress||0)+'%';modal.querySelector('.diagnostic-step').textContent=item.currentStep||'Verificando...';if(['completed','failed'].includes(item.status)){modal.querySelector('[data-diagnostic-copy]').textContent=item.status==='completed'?'Diagnóstico concluído. Os resultados foram enviados ao suporte.':'O diagnóstico foi interrompido. O suporte recebeu os resultados disponíveis.';modal.querySelector('.diagnostic-step').textContent=item.status==='completed'?'Concluído':'Falha no diagnóstico';setTimeout(()=>{modal.classList.add('hidden');active=null},2200);return}}catch{}pollTimer=setTimeout(poll,550)}
+      modal.querySelector('[data-diagnostic-accept]').addEventListener('click',async()=>{if(!active)return;modal.querySelector('.diagnostic-actions').classList.add('hidden');modal.querySelector('.diagnostic-progress').classList.remove('hidden');modal.querySelector('[data-diagnostic-copy]').textContent='Diagnóstico em andamento. Mantenha o Painel NinjaFlix aberto por alguns instantes.';await req('/diagnostics/'+encodeURIComponent(active.id)+'/run',{method:'POST',body:'{}'});poll()});
+      modal.querySelector('[data-diagnostic-decline]').addEventListener('click',async()=>{if(active)await req('/diagnostics/'+encodeURIComponent(active.id)+'/decline',{method:'POST',body:'{}'}).catch(()=>null);modal.classList.add('hidden');active=null});
+      const timer=setInterval(()=>{const events=window.__runtimeEvents;if(!events||events.__diagnosticAttached)return;events.__diagnosticAttached=true;clearInterval(timer);events.addEventListener('diagnostic-requested',checkPending)},250);setTimeout(checkPending,1800);setInterval(()=>{if(!document.hidden&&!active)checkPending()},45000)
     })();
     const reconcileAgentAccessVisible=reconcileAgentAccess;
     reconcileAgentAccess=async function(){if(document.hidden)return;return reconcileAgentAccessVisible()};
@@ -1595,9 +1622,14 @@ function installedKernelPath(version = expectedKernelVersion()) {
 }
 
 function kernelIsInstalled(version = expectedKernelVersion(), build = '') {
-  if (['darwin', 'linux'].includes(process.platform)) return true;
+  if (process.platform === 'linux') return true;
   const root = installedKernelPath(version);
   const marker = path.join(root, 'update_version_key');
+  if (process.platform === 'darwin') {
+    if (!fs.existsSync(root) || !fs.existsSync(marker)) return false;
+    if (!build) return true;
+    try { return fs.readFileSync(marker, 'utf8').trim() === String(build).trim(); } catch { return false; }
+  }
   if (!fs.existsSync(path.join(root, 'SunBrowser.exe')) || !fs.existsSync(path.join(root, 'chromedriver.exe')) || !fs.existsSync(marker)) return false;
   if (!build) return true;
   try { return fs.readFileSync(marker, 'utf8').trim() === String(build).trim(); } catch { return false; }
@@ -1661,6 +1693,15 @@ async function downloadKernelPackage(item, targetPath) {
 
 let sunbrowserBootstrapInFlight = null;
 async function installSunbrowserExecutable(installerPath) {
+  if (process.platform === 'darwin') {
+    const shellQuotedPath = `'${String(installerPath).replaceAll("'", "'\\''")}'`;
+    const shellCommand = `/usr/sbin/installer -pkg ${shellQuotedPath} -target /`;
+    const appleScriptCommand = shellCommand.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+    await runExecutable('/usr/bin/osascript', ['-e', `do shell script "${appleScriptCommand}" with administrator privileges`], {
+      timeout: 20 * 60 * 1000
+    });
+    return;
+  }
   return new Promise((resolve, reject) => {
     execFile(installerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'], {
       windowsHide: true,
@@ -1709,15 +1750,16 @@ async function validateAndInstallLinuxAdsPower(installerPath, item) {
 }
 
 async function ensurePublishedSunbrowserUpdates(options = {}) {
-  if (!['win32', 'linux'].includes(process.platform)) return { ok: true, skipped: true, reason: 'platform', installed: [] };
+  if (!['win32', 'darwin', 'linux'].includes(process.platform)) return { ok: true, skipped: true, reason: 'platform', installed: [] };
   if (sunbrowserBootstrapInFlight) return sunbrowserBootstrapInFlight;
   const previousCheck = new Date(loadLocalState().sunbrowserLastCheckedAt || 0).getTime();
   if (!options.force && Number.isFinite(previousCheck) && Date.now() - previousCheck < 6 * 60 * 60 * 1000) {
     return { ok: true, alreadyChecked: true, installed: [], checkedAt: new Date(previousCheck).toISOString() };
   }
   sunbrowserBootstrapInFlight = (async () => {
-    const platform = process.platform === 'linux' ? 'linux' : 'windows';
-    const plan = await portalRequestWithSessionRefresh(`/api/agent/sunbrowser-bootstrap?platform=${platform}&arch=x64`, { method: 'GET' });
+    const platform = process.platform === 'linux' ? 'linux' : (process.platform === 'darwin' ? 'macos' : 'windows');
+    const arch = process.platform === 'darwin' ? (process.arch === 'arm64' ? 'arm64' : 'x64') : 'x64';
+    const plan = await portalRequestWithSessionRefresh(`/api/agent/sunbrowser-bootstrap?platform=${platform}&arch=${arch}`, { method: 'GET' });
     const candidates = Array.isArray(plan.updates) ? plan.updates : [];
     const updates = [];
     for (const item of candidates) {
@@ -1739,7 +1781,7 @@ async function ensurePublishedSunbrowserUpdates(options = {}) {
     try {
       for (let index = 0; index < updates.length; index += 1) {
         const item = updates[index];
-        const extension = process.platform === 'linux' ? '.deb' : '.exe';
+        const extension = process.platform === 'linux' ? '.deb' : (process.platform === 'darwin' ? '.pkg' : '.exe');
         const installerPath = path.join(workRoot, `${item.id}${extension}`);
         fs.rmSync(installerPath, { force: true });
         const startPercent = Math.round((index / updates.length) * 90);
@@ -1759,7 +1801,10 @@ async function ensurePublishedSunbrowserUpdates(options = {}) {
       emitRuntimeEvent('sunbrowser-bootstrap', { status: 'error', percent: null, message: error.message || 'Falha ao atualizar o SunBrowser.', experience: plan.experience || null });
       throw error;
     } finally {
-      for (const item of updates) fs.rmSync(path.join(workRoot, `${item.id}${process.platform === 'linux' ? '.deb' : '.exe'}`), { force: true });
+      for (const item of updates) {
+        const extension = process.platform === 'linux' ? '.deb' : (process.platform === 'darwin' ? '.pkg' : '.exe');
+        fs.rmSync(path.join(workRoot, `${item.id}${extension}`), { force: true });
+      }
     }
   })().finally(() => { sunbrowserBootstrapInFlight = null; });
   return sunbrowserBootstrapInFlight;
@@ -2274,6 +2319,54 @@ function scheduleCatalogRefresh(event = {}) {
   }, jitterMs);
 }
 
+async function updateDiagnostic(diagnosticId, patch = {}) {
+  const current = diagnosticJobs.get(diagnosticId) || { id: diagnosticId, status: 'accepted', progress: 0, results: [] };
+  const next = { ...current, ...patch, results: patch.results || current.results || [], updatedAt: new Date().toISOString() };
+  diagnosticJobs.set(diagnosticId, next);
+  emitRuntimeEvent('diagnostic-progress', next);
+  await portalRequestWithSessionRefresh(`/api/agent/diagnostics/${encodeURIComponent(diagnosticId)}`, { method: 'POST', body: JSON.stringify(next) });
+  return next;
+}
+
+async function runAgentDiagnostic(diagnosticId) {
+  const results = [];
+  const add = async (key, label, status, detail, progress) => {
+    results.push({ key, label, status, detail: String(detail || '') });
+    await updateDiagnostic(diagnosticId, { status: progress >= 100 ? 'completed' : 'running', progress, currentStep: label, results });
+  };
+  try {
+    await updateDiagnostic(diagnosticId, { status: 'running', progress: 3, currentStep: 'Iniciando verificações', results });
+    await add('panel', 'Painel NinjaFlix', 'ok', `Versão ${APP_VERSION} · ${process.platform} ${process.arch}`, 12);
+    const executable = findAdspowerExecutable();
+    await add('adspower-install', 'Instalação do AdsPower', executable ? 'ok' : 'error', executable ? `Executável localizado em ${executable}` : 'Executável não localizado nos caminhos conhecidos', 25);
+    const processRunning = await isAdspowerProcessRunning().catch(() => false);
+    await add('adspower-process', 'Processo do AdsPower', processRunning ? 'ok' : 'warning', processRunning ? 'Processo em execução' : 'Processo não foi encontrado em execução', 38);
+    try {
+      const api = await listLocalAdspowerProfiles({ forceRefresh: true });
+      const total = (api.groups || []).reduce((sum, group) => sum + Number(group.profiles?.length || 0), 0);
+      await add('adspower-api', 'API local 127.0.0.1:50326', api.ok === false ? 'error' : 'ok', api.ok === false ? (api.error || 'API respondeu com falha') : `API respondeu e listou ${total} perfil(is)`, 54);
+    } catch (error) {
+      await add('adspower-api', 'API local 127.0.0.1:50326', 'error', error.message || 'Sem resposta da API local', 54);
+    }
+    try {
+      const host = new URL(PORTAL_URL).hostname;
+      const addresses = await dns.lookup(host, { all: true });
+      await add('dns', 'DNS do painel', addresses.length ? 'ok' : 'error', addresses.length ? `${host} resolvido com sucesso` : 'Nenhum endereço retornado', 66);
+    } catch (error) { await add('dns', 'DNS do painel', 'error', error.message, 66); }
+    try {
+      await portalRequestWithSessionRefresh('/api/agent/client-shell-config', { method: 'GET' });
+      await add('server', 'Conexão segura com a VPS', 'ok', `${PORTAL_URL} respondeu corretamente`, 78);
+    } catch (error) { await add('server', 'Conexão segura com a VPS', 'error', error.message, 78); }
+    const proxyConfigured = Boolean(process.env.HTTP_PROXY || process.env.HTTPS_PROXY || process.env.ALL_PROXY);
+    await add('proxy', 'Proxy do sistema', proxyConfigured ? 'warning' : 'ok', proxyConfigured ? 'Há um proxy configurado no ambiente do painel' : 'Nenhum proxy de ambiente detectado', 86);
+    const freeMemoryGb = (os.freemem() / 1073741824).toFixed(1);
+    await add('resources', 'Recursos do computador', Number(freeMemoryGb) < 0.5 ? 'warning' : 'ok', `${freeMemoryGb} GB de memória disponível`, 94);
+    await add('clock', 'Relógio e sessão', 'info', `Verificação concluída em ${new Date().toLocaleString('pt-BR')}`, 100);
+  } catch (error) {
+    await updateDiagnostic(diagnosticId, { status: 'failed', progress: 100, currentStep: 'Diagnóstico interrompido', summary: error.message || 'Falha inesperada', results }).catch(() => null);
+  }
+}
+
 function handleAgentDataEvent(event = {}) {
   const scope = String(event.scope || '').trim().toLowerCase();
   if (!scope) return;
@@ -2281,6 +2374,7 @@ function handleAgentDataEvent(event = {}) {
   if (scope === 'support') emitRuntimeEvent('support-chat-changed', event);
   if (scope === 'popups' || (scope === 'support' && event.status === 'closed')) emitRuntimeEvent('popups-changed', event);
   if (scope === 'updates') emitRuntimeEvent('desktop-update-changed', event);
+  if (scope === 'diagnostic') emitRuntimeEvent('diagnostic-requested', event);
   if (scope === 'subscription' || scope === 'access') {
     heartbeatCache = { checkedAt: 0, payload: null };
     void heartbeat({ force: true })
@@ -3482,11 +3576,48 @@ async function route(req, res) {
       return json(res, 201, await portalRequestWithSessionRefresh('/api/agent/support-tickets', { method: 'POST', body: JSON.stringify(body) }));
     }
 
+    if (req.method === 'GET' && url.pathname === '/diagnostics/pending') {
+      await ensureMachineAuthenticated();
+      return json(res, 200, await portalRequestWithSessionRefresh('/api/agent/diagnostics/pending', { method: 'GET' }));
+    }
+
+    const diagnosticRunMatch = url.pathname.match(/^\/diagnostics\/([^/]+)\/run$/);
+    if (req.method === 'POST' && diagnosticRunMatch) {
+      await ensureMachineAuthenticated();
+      const id = decodeURIComponent(diagnosticRunMatch[1]);
+      if (!diagnosticJobs.has(id) || ['failed', 'completed', 'declined'].includes(diagnosticJobs.get(id)?.status)) {
+        diagnosticJobs.set(id, { id, status: 'accepted', progress: 0, currentStep: 'Autorizado pelo cliente', results: [] });
+        void runAgentDiagnostic(id);
+      }
+      return json(res, 202, { diagnostic: diagnosticJobs.get(id) });
+    }
+
+    const diagnosticDeclineMatch = url.pathname.match(/^\/diagnostics\/([^/]+)\/decline$/);
+    if (req.method === 'POST' && diagnosticDeclineMatch) {
+      await ensureMachineAuthenticated();
+      const id = decodeURIComponent(diagnosticDeclineMatch[1]);
+      const payload = { status: 'declined', progress: 0, currentStep: 'Recusado pelo cliente', results: [] };
+      diagnosticJobs.set(id, { id, ...payload });
+      await portalRequestWithSessionRefresh(`/api/agent/diagnostics/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify(payload) });
+      return json(res, 200, { ok: true });
+    }
+
+    const diagnosticStatusMatch = url.pathname.match(/^\/diagnostics\/([^/]+)\/status$/);
+    if (req.method === 'GET' && diagnosticStatusMatch) {
+      return json(res, 200, { diagnostic: diagnosticJobs.get(decodeURIComponent(diagnosticStatusMatch[1])) || null });
+    }
+
     const supportMessageMatch = url.pathname.match(/^\/support-tickets\/([^/]+)\/messages$/);
     if (req.method === 'POST' && supportMessageMatch) {
       const body = await readBody(req);
       await ensureMachineAuthenticated();
       return json(res, 200, await portalRequestWithSessionRefresh(`/api/agent/support-tickets/${encodeURIComponent(supportMessageMatch[1])}/messages`, { method: 'POST', body: JSON.stringify(body) }));
+    }
+
+    const supportCloseMatch = url.pathname.match(/^\/support-tickets\/([^/]+)\/close$/);
+    if (req.method === 'POST' && supportCloseMatch) {
+      await ensureMachineAuthenticated();
+      return json(res, 200, await portalRequestWithSessionRefresh(`/api/agent/support-tickets/${encodeURIComponent(supportCloseMatch[1])}/close`, { method: 'POST', body: '{}' }));
     }
 
     if (req.method === 'POST' && url.pathname === '/launch-link') {

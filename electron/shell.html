@@ -361,6 +361,11 @@
       statusEl.classList.remove('show');
       statusEl.classList.remove('loading');
       updateNavigation();
+      // Páginas do dashboard não executam o preload do agente e, portanto,
+      // não emitem ninjaflix-content-ready. A navegação concluída é o sinal
+      // correto para liberar o overlay sem esperar o watchdog de 30 segundos.
+      agentContentReady = true;
+      finishPanelLoadIfReady();
     });
 
     view.addEventListener('did-navigate', updateNavigation);
