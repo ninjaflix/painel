@@ -45,6 +45,64 @@ jobs:
           test -s "$PKG"
           pkgutil --check-signature "$PKG" || true
           shasum -a 256 -c ARQUIVOS-GERADOS/3-INSTALADORES-AUXILIARES/SUNBROWSER-150-MAC-ARM64/SHA256-NinjaFlixSunBrowser150Setup-mac-arm64.txt
+          mkdir -p "$RUNNER_TEMP/sunbrowser150-parts"
+          split -b 48m -d -a 2 "$PKG" "$RUNNER_TEMP/sunbrowser150-parts/part-"
+
+      - name: Disponibilizar parte 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunBrowser150-part-00
+          path: ${{ runner.temp }}/sunbrowser150-parts/part-00
+          compression-level: 0
+          retention-days: 1
+
+      - name: Disponibilizar parte 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunBrowser150-part-01
+          path: ${{ runner.temp }}/sunbrowser150-parts/part-01
+          compression-level: 0
+          retention-days: 1
+
+      - name: Disponibilizar parte 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunBrowser150-part-02
+          path: ${{ runner.temp }}/sunbrowser150-parts/part-02
+          compression-level: 0
+          retention-days: 1
+
+      - name: Disponibilizar parte 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunBrowser150-part-03
+          path: ${{ runner.temp }}/sunbrowser150-parts/part-03
+          compression-level: 0
+          retention-days: 1
+
+      - name: Disponibilizar parte 04
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunBrowser150-part-04
+          path: ${{ runner.temp }}/sunbrowser150-parts/part-04
+          compression-level: 0
+          retention-days: 1
+
+      - name: Disponibilizar parte 05
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunBrowser150-part-05
+          path: ${{ runner.temp }}/sunbrowser150-parts/part-05
+          compression-level: 0
+          retention-days: 1
+
+      - name: Disponibilizar parte 06
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunBrowser150-part-06
+          path: ${{ runner.temp }}/sunbrowser150-parts/part-06
+          compression-level: 0
+          retention-days: 1
 
       - name: Disponibilizar instalador e diagnosticos
         if: always()
@@ -57,5 +115,6 @@ jobs:
             ${{ runner.temp }}/ninjaflix-sunbrowser150/api-status.json
             ${{ runner.temp }}/ninjaflix-sunbrowser150/browser-start.json
             ${{ runner.temp }}/ninjaflix-sunbrowser150/profile-list.json
+            ${{ runner.temp }}/ninjaflix-sunbrowser150/kernel-discovery
           if-no-files-found: warn
           retention-days: 7

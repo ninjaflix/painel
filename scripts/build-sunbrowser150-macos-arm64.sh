@@ -43,6 +43,7 @@ hdiutil detach "$MOUNT" -quiet
 
 echo "Iniciando AdsPower pela Local API..."
 "$ADS_EXEC" --args --headless=true --api-key="$API_KEY" --api-port="$API_PORT" >"$WORK/adspower.log" 2>&1 &
+ADS_PID=$!
 for _ in $(seq 1 90); do
   if curl -fsS "http://127.0.0.1:$API_PORT/status" >"$WORK/api-status.json" 2>/dev/null; then break; fi
   sleep 2
@@ -81,6 +82,45 @@ echo "Abrindo o perfil para provocar o download do SunBrowser 150..."
 ENCODED_PROFILE="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$PROFILE_ID")"
 curl -fsS "http://127.0.0.1:$API_PORT/api/v1/browser/start?user_id=$ENCODED_PROFILE&open_tabs=0" >"$WORK/browser-start.json" || true
 
+if grep -qi 'not ready.*download' "$WORK/browser-start.json"; then
+  echo "O AdsPower confirmou que o perfil usa o kernel 150. Consultando o gerenciador oficial de kernels..."
+  META_OK=0
+  for API_BASE in https://api.adspower.net/ https://api-global.adspower.net/ https://api.adspower.com/; do
+    if curl -fsS --retry 2 --connect-timeout 15 --max-time 60 \
+      -H "api-key: $API_KEY" \
+      "${API_BASE}client/browser/get-browser-version?type=chrome&kernel=150&system=arm64&is_self_refresh=1" \
+      >"$WORK/kernel-150-meta.json"; then
+      if python3 - "$WORK/kernel-150-meta.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding='utf-8'))
+item = data.get('data') or {}
+raise SystemExit(0 if data.get('code') == 0 and item.get('download_url') and item.get('file_md5') and item.get('version') else 1)
+PY
+      then
+        META_OK=1
+        break
+      fi
+    fi
+  done
+  [[ "$META_OK" == 1 ]] || { echo "O gerenciador oficial nao retornou o pacote do kernel 150." >&2; exit 2; }
+
+  KERNEL_URL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["data"]["download_url"])' "$WORK/kernel-150-meta.json")"
+  KERNEL_MD5="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["data"]["file_md5"].lower())' "$WORK/kernel-150-meta.json")"
+  KERNEL_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["data"]["version"])' "$WORK/kernel-150-meta.json")"
+  KERNEL_ZIP="$WORK/sunbrowser-150-arm64.zip"
+  echo "Baixando o pacote oficial do SunBrowser 150..."
+  curl --fail --location --retry 4 --retry-delay 3 "$KERNEL_URL" -o "$KERNEL_ZIP"
+  ACTUAL_MD5="$(md5 -q "$KERNEL_ZIP" | tr '[:upper:]' '[:lower:]')"
+  [[ "$ACTUAL_MD5" == "$KERNEL_MD5" ]] || { echo "MD5 do pacote oficial nao confere." >&2; exit 2; }
+  mkdir -p "$KERNEL_DIR"
+  ditto -x -k "$KERNEL_ZIP" "$KERNEL_DIR"
+  printf '%s' "$KERNEL_VERSION" >"$KERNEL_DIR/update_version_key"
+  BROWSER_KEY="$(ps eww -p "$ADS_PID" 2>/dev/null | tr ' ' '\n' | sed -n 's/^SUNFLOWER_BROWSER_VERSION_150=//p' | head -n 1)"
+  if [[ -n "$BROWSER_KEY" ]]; then
+    printf '%s' "$BROWSER_KEY" >"$KERNEL_DIR/browser_key_150"
+  fi
+fi
+
 for _ in $(seq 1 180); do
   MARKER="$(find "$KERNEL_DIR" -maxdepth 2 -type f -name 'update_version_key' -print -quit 2>/dev/null || true)"
   APP_BIN="$(find "$KERNEL_DIR" -type f \( -name 'SunBrowser' -o -name 'Chromium' -o -name 'Google Chrome for Testing' \) -perm -111 -print -quit 2>/dev/null || true)"
@@ -93,8 +133,17 @@ MARKER="$(find "$KERNEL_DIR" -maxdepth 2 -type f -name 'update_version_key' -pri
 APP_BIN="$(find "$KERNEL_DIR" -type f \( -name 'SunBrowser' -o -name 'Chromium' -o -name 'Google Chrome for Testing' \) -perm -111 -print -quit)"
 [[ -n "$MARKER" && -n "$APP_BIN" ]] || { echo "Download do kernel 150 incompleto." >&2; find "$KERNEL_DIR" -maxdepth 3 -print >&2; exit 1; }
 KERNEL_BUILD="$(tr -d '\r\n ' < "$MARKER")"
-[[ "$KERNEL_BUILD" == 150.* ]] || { echo "Build inesperado: $KERNEL_BUILD" >&2; exit 1; }
+[[ -n "$KERNEL_BUILD" ]] || { echo "Marcador de build vazio." >&2; exit 1; }
+if [[ -n "${KERNEL_VERSION:-}" && "$KERNEL_BUILD" != "$KERNEL_VERSION" ]]; then
+  echo "Build instalado ($KERNEL_BUILD) difere do metadado oficial ($KERNEL_VERSION)." >&2
+  exit 1
+fi
+BROWSER_APP="$(find "$KERNEL_DIR" -maxdepth 3 -type d -name 'SunBrowser.app' -print -quit)"
+[[ -n "$BROWSER_APP" ]] || { echo "SunBrowser.app nao encontrado no kernel instalado." >&2; exit 1; }
+BROWSER_MAJOR="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$BROWSER_APP/Contents/Info.plist" | cut -d. -f1)"
+[[ "$BROWSER_MAJOR" == "150" ]] || { echo "Kernel Chromium inesperado: $BROWSER_MAJOR" >&2; exit 1; }
 lipo -archs "$APP_BIN" | grep -qw arm64
+codesign --verify --deep --strict --verbose=2 "$BROWSER_APP"
 
 curl -fsS "http://127.0.0.1:$API_PORT/api/v1/browser/stop?user_id=$ENCODED_PROFILE" >/dev/null 2>&1 || true
 sleep 3
