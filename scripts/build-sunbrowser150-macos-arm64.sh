@@ -133,8 +133,17 @@ MARKER="$(find "$KERNEL_DIR" -maxdepth 2 -type f -name 'update_version_key' -pri
 APP_BIN="$(find "$KERNEL_DIR" -type f \( -name 'SunBrowser' -o -name 'Chromium' -o -name 'Google Chrome for Testing' \) -perm -111 -print -quit)"
 [[ -n "$MARKER" && -n "$APP_BIN" ]] || { echo "Download do kernel 150 incompleto." >&2; find "$KERNEL_DIR" -maxdepth 3 -print >&2; exit 1; }
 KERNEL_BUILD="$(tr -d '\r\n ' < "$MARKER")"
-[[ "$KERNEL_BUILD" == 150.* ]] || { echo "Build inesperado: $KERNEL_BUILD" >&2; exit 1; }
+[[ -n "$KERNEL_BUILD" ]] || { echo "Marcador de build vazio." >&2; exit 1; }
+if [[ -n "${KERNEL_VERSION:-}" && "$KERNEL_BUILD" != "$KERNEL_VERSION" ]]; then
+  echo "Build instalado ($KERNEL_BUILD) difere do metadado oficial ($KERNEL_VERSION)." >&2
+  exit 1
+fi
+BROWSER_APP="$(find "$KERNEL_DIR" -maxdepth 3 -type d -name 'SunBrowser.app' -print -quit)"
+[[ -n "$BROWSER_APP" ]] || { echo "SunBrowser.app nao encontrado no kernel instalado." >&2; exit 1; }
+BROWSER_MAJOR="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$BROWSER_APP/Contents/Info.plist" | cut -d. -f1)"
+[[ "$BROWSER_MAJOR" == "150" ]] || { echo "Kernel Chromium inesperado: $BROWSER_MAJOR" >&2; exit 1; }
 lipo -archs "$APP_BIN" | grep -qw arm64
+codesign --verify --deep --strict --verbose=2 "$BROWSER_APP"
 
 curl -fsS "http://127.0.0.1:$API_PORT/api/v1/browser/stop?user_id=$ENCODED_PROFILE" >/dev/null 2>&1 || true
 sleep 3
