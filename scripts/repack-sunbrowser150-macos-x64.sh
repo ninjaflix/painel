@@ -49,7 +49,8 @@ TARGET="$TARGET_PARENT/chrome_150"
 STAGING="$TARGET_PARENT/chrome_150.ninjaflix-installing"
 BACKUP="$TARGET_PARENT/chrome_150.ninjaflix-backup"
 
-pkill -u "$(id -u "$CONSOLE_USER")" -if 'AdsPower Global|SunBrowser' >/dev/null 2>&1 || true
+pkill -u "$(id -u "$CONSOLE_USER")" -f '/Applications/AdsPower Global.app/Contents/MacOS/AdsPower Global' >/dev/null 2>&1 || true
+pkill -u "$(id -u "$CONSOLE_USER")" -f '/SunBrowser.app/Contents/MacOS/SunBrowser' >/dev/null 2>&1 || true
 sleep 2
 [[ -f "$SOURCE/update_version_key" ]] || exit 66
 mkdir -p "$TARGET_PARENT"
