@@ -44,6 +44,9 @@ jobs:
       - name: Compilar macOS Intel
         run: npm run build:mac:intel
 
+      - name: Remover copia temporaria antes do teste de instalacao
+        run: rm -rf dist-macos
+
       - name: Testar instalacao, assinatura interna e Gatekeeper
         env:
           EXPECTED_ARCH: x86_64
