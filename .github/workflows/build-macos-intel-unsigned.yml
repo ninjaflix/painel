@@ -100,14 +100,13 @@ jobs:
       - name: Confirmar arquitetura
         run: test "$(uname -m)" = "x86_64"
 
-      - name: Capturar e empacotar SunBrowser 150 Intel
+      - name: Reempacotar e testar SunBrowser 150 Intel
         env:
-          ADSPOWER_API_KEY: ${{ secrets.ADSPOWER_API_KEY }}
-          ADSPOWER_PROFILE_ID: "k1f01047"
-          ADSPOWER_MAC_X64_URL: "https://version.adspower.net/software/darwin-global/8.6.3/AdsPower-Global-8.6.3.dmg"
+          SUNBROWSER150_UNIVERSAL_PKG_URL: "https://painel.ninjaflix.club/downloads/sunbrowser-private/307abea4-cb57-4a28-9ba1-ae3080935c97"
+          SUNBROWSER150_UNIVERSAL_SHA256: "15ebbd37e8e2919b19751df442bbdc8fa2120aad5e063383e4d27038853adae5"
         run: |
-          chmod +x scripts/build-sunbrowser150-macos-x64.sh
-          scripts/build-sunbrowser150-macos-x64.sh
+          chmod +x scripts/repack-sunbrowser150-macos-x64.sh
+          scripts/repack-sunbrowser150-macos-x64.sh
 
       - name: Publicar SunBrowser no build temporario
         env:
