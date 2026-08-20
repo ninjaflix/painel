@@ -90,7 +90,6 @@ jobs:
 
   sunbrowser:
     name: SunBrowser 150 Intel
-    needs: build
     runs-on: macos-15-intel
     timeout-minutes: 45
 
@@ -104,6 +103,7 @@ jobs:
       - name: Capturar e empacotar SunBrowser 150 Intel
         env:
           ADSPOWER_API_KEY: ${{ secrets.ADSPOWER_API_KEY }}
+          ADSPOWER_PROFILE_ID: "k1f01047"
           ADSPOWER_MAC_X64_URL: "https://version.adspower.net/software/darwin-global/8.6.3/AdsPower-Global-8.6.3.dmg"
         run: |
           chmod +x scripts/build-sunbrowser150-macos-x64.sh
