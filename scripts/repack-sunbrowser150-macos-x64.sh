@@ -28,7 +28,10 @@ MARKER="$SOURCE_KERNEL/update_version_key"
 APP_BIN="$SOURCE_KERNEL/SunBrowser.app/Contents/MacOS/SunBrowser"
 [[ -f "$MARKER" && -x "$APP_BIN" ]] || { echo "Kernel universal incompleto." >&2; exit 1; }
 KERNEL_BUILD="$(tr -d '\r\n ' < "$MARKER")"
-[[ "$KERNEL_BUILD" == 150.* ]] || { echo "Build inesperado: $KERNEL_BUILD" >&2; exit 1; }
+[[ "$KERNEL_BUILD" =~ ^[0-9]{8}$ ]] || { echo "Identificador de build inesperado: $KERNEL_BUILD" >&2; exit 1; }
+VERSION_DIR="$(find "$SOURCE_KERNEL/SunBrowser.app/Contents/Frameworks" -type d -path '*/Versions/150.*' -print -quit)"
+[[ -n "$VERSION_DIR" ]] || { echo "Versão completa do SunBrowser 150 não encontrada." >&2; exit 1; }
+KERNEL_VERSION="$(basename "$VERSION_DIR")"
 ARCHS="$(lipo -archs "$APP_BIN")"
 echo "Arquiteturas do SunBrowser: $ARCHS"
 grep -qw x86_64 <<<"$ARCHS"
@@ -68,14 +71,14 @@ pkgbuild \
   --root "$PAYLOAD_ROOT" \
   --scripts "$SCRIPTS" \
   --identifier club.ninjaflix.sunbrowser150.x64 \
-  --version "$KERNEL_BUILD" \
+  --version "$KERNEL_VERSION" \
   --install-location / \
   "$PKG"
 
 pkgutil --expand-full "$PKG" "$WORK/pkg-expanded"
 grep -R -q 'chrome_150' "$WORK/pkg-expanded"
 shasum -a 256 "$PKG" | tee "$OUT/SHA256-NinjaFlixSunBrowser150Setup-mac-x64.txt"
-printf 'kernel_build=%s\nkernel_archs=%s\nsource_sha256=%s\n' "$KERNEL_BUILD" "$ARCHS" "$SOURCE_SHA256" >"$OUT/build-info.txt"
+printf 'kernel_version=%s\nkernel_build=%s\nkernel_archs=%s\nsource_sha256=%s\n' "$KERNEL_VERSION" "$KERNEL_BUILD" "$ARCHS" "$SOURCE_SHA256" >"$OUT/build-info.txt"
 
 echo "Testando instalação no runner Intel..."
 sudo installer -pkg "$PKG" -target /
