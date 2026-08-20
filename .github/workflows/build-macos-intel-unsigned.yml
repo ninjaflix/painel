@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/build-macos-intel-unsigned.yml"
       - "scripts/build-macos.sh"
+      - "scripts/build-sunbrowser150-macos-x64.sh"
       - "scripts/test-macos-unsigned-installer.sh"
 
 permissions:
@@ -29,7 +30,7 @@ jobs:
       - name: Confirmar arquitetura e versao
         run: |
           test "$(uname -m)" = "x86_64"
-          node -p "require('./package.json').version" | grep -qx "2.0.2"
+          node -p "require('./package.json').version" | grep -qx "2.0.6"
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -46,15 +47,15 @@ jobs:
       - name: Testar instalacao, assinatura interna e Gatekeeper
         env:
           EXPECTED_ARCH: x86_64
-          EXPECTED_VERSION: 2.0.2
+          EXPECTED_VERSION: 2.0.6
           REPORT_SLUG: MAC-INTEL
           REPORT_TITLE: macOS Intel
         run: |
           chmod +x scripts/test-macos-unsigned-installer.sh
           scripts/test-macos-unsigned-installer.sh \
-            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/NinjaFlixCompletoSetup-2.0.2-mac-x64.pkg \
+            ARQUIVOS-GERADOS/2-INSTALACAO-COMPLETA-NOVOS-CLIENTES/MAC/NinjaFlixCompletoSetup-2.0.6-mac-x64.pkg \
             ARQUIVOS-GERADOS/RELATORIOS/MAC-INTEL-ADHOC
-          cat ARQUIVOS-GERADOS/RELATORIOS/MAC-INTEL-ADHOC/RELATORIO-TESTE-MAC-INTEL-2.0.2-ADHOC.md >> "$GITHUB_STEP_SUMMARY"
+          cat ARQUIVOS-GERADOS/RELATORIOS/MAC-INTEL-ADHOC/RELATORIO-TESTE-MAC-INTEL-2.0.6-ADHOC.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Mostrar arquivos gerados
         run: |
@@ -65,9 +66,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="build-2.0.2-temp"
+          TAG="build-2.0.6-temp"
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.2" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Build temporario 2.0.6" --notes "Arquivos de compilacao para publicacao na VPS." --prerelease || \
             gh release view "$TAG" >/dev/null
           gh release upload "$TAG" \
             ARQUIVOS-GERADOS/1-ATUALIZACAO-PAINEL-PUBLICAR-NO-ADMIN/MAC/*-x64.zip \
@@ -80,6 +81,43 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostico-mac-intel-adhoc-2.0.2
+          name: diagnostico-mac-intel-adhoc-2.0.6
           path: ARQUIVOS-GERADOS/RELATORIOS/MAC-INTEL-ADHOC
           retention-days: 30
+
+  sunbrowser:
+    name: SunBrowser 150 Intel
+    needs: build
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v6
+
+      - name: Confirmar arquitetura
+        run: test "$(uname -m)" = "x86_64"
+
+      - name: Capturar e empacotar SunBrowser 150 Intel
+        env:
+          ADSPOWER_API_KEY: ${{ secrets.ADSPOWER_API_KEY }}
+          ADSPOWER_MAC_X64_URL: "https://version.adspower.net/software/darwin-global/8.6.3/AdsPower-Global-8.6.3.dmg"
+        run: |
+          chmod +x scripts/build-sunbrowser150-macos-x64.sh
+          scripts/build-sunbrowser150-macos-x64.sh
+
+      - name: Publicar SunBrowser no build temporario
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-2.0.6-temp"
+          gh release upload "$TAG" \
+            ARQUIVOS-GERADOS/3-INSTALADORES-AUXILIARES/SUNBROWSER-150-MAC-X64/* \
+            --clobber
+
+      - name: Anexar SunBrowser Intel
+        uses: actions/upload-artifact@v4
+        with:
+          name: sunbrowser-150-macos-x64
+          path: ARQUIVOS-GERADOS/3-INSTALADORES-AUXILIARES/SUNBROWSER-150-MAC-X64
+          retention-days: 7
